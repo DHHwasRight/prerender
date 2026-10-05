@@ -51,6 +51,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use clap::{Args, Parser, Subcommand};
+use walkdir::WalkDir;
+
+pub mod assets;
+pub mod content;
+
+pub use content::{Doc, FrontMatter};
 pub use rsx;
 
 /// Rendered markup. Layouts receive and return it, so a layer can be rendered
@@ -321,16 +328,23 @@ fn write_page(root: &Path, segs: &[String], html: &str) -> io::Result<()> {
     fs::write(path, html)
 }
 
+/// Mirrors `src` into `dst`, returning how many files were copied.
+///
+/// Empty directories are recreated too: an asset tree is served as-is, and a
+/// missing directory is a different site than an empty one.
 fn copy_dir(src: &Path, dst: &Path) -> io::Result<usize> {
     let mut copied = 0;
-    for entry in fs::read_dir(src)? {
+    for entry in WalkDir::new(src) {
         let entry = entry?;
-        let target = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
+        // Every entry sits under `src`, so the relative path is the position
+        // it should take under `dst`.
+        let target = dst.join(entry.path().strip_prefix(src).unwrap_or(entry.path()));
+        if entry.file_type().is_dir() {
             fs::create_dir_all(&target)?;
-            copied += copy_dir(&entry.path(), &target)?;
         } else {
-            fs::create_dir_all(dst)?;
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
             fs::copy(entry.path(), &target)?;
             copied += 1;
         }
@@ -345,23 +359,6 @@ pub struct Report {
     pub partial_bytes: usize,
     pub assets: usize,
 }
-
-const USAGE: &str = "\
-usage: <site> <command> [options]
-
-commands:
-  build            render both trees
-  nginx            print an nginx config for the built trees
-  check            verify every layout marks itself with dp-layout
-
-options:
-  --out <DIR>          full documents        [default: dist]
-  --partial-out <DIR>  partials              [default: dist-partial]
-  --header <NAME>      partial request header [default: DP-Partial]
-  --prefix <DIR>       nginx runtime dir      [default: .run]
-  --port <PORT>        nginx listen port      [default: 8080]
-  --mime-types <FILE>  nginx mime.types       [default: found from `nginx -V`]
-";
 
 /// Locates nginx's own mime.types, so the generated config does not hardcode a
 /// path that is wrong on every machine but the one it was written on.
@@ -378,35 +375,70 @@ fn nginx_mime_types() -> String {
     "/etc/nginx/mime.types".to_string()
 }
 
+/// The site binary's command line.
+#[derive(Parser)]
+#[command(name = "<site>", about = "Render a prerendered site and serve it from nginx.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Cmd>,
+    // Global, so that both `<site> --out dir` and `<site> build --out dir`
+    // parse: the subcommand is optional, and an option must not change meaning
+    // depending on whether the user spelled the default one out.
+    #[command(flatten)]
+    opts: Opts,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Render both trees.
+    Build,
+    /// Print an nginx config for the built trees.
+    Nginx,
+    /// Verify every layout marks itself with dp-layout.
+    Check,
+}
+
+#[derive(Args)]
+struct Opts {
+    /// Where the full documents go.
+    #[arg(long, global = true, value_name = "DIR", default_value = "dist")]
+    out: PathBuf,
+    /// Where the partials go.
+    #[arg(long, global = true, value_name = "DIR", default_value = "dist-partial")]
+    partial_out: PathBuf,
+    /// Request header that selects the partial tree.
+    #[arg(long, global = true, value_name = "NAME", default_value = "DP-Partial")]
+    header: String,
+    /// nginx runtime dir, for its pid, logs and temp dirs.
+    #[arg(long, global = true, value_name = "DIR", default_value = ".run")]
+    prefix: PathBuf,
+    /// nginx listen port.
+    #[arg(long, global = true, value_name = "PORT", default_value_t = 8080)]
+    port: u16,
+    /// nginx mime.types [default: found from `nginx -V`]
+    ///
+    /// Resolved after parsing rather than as a clap default, so that merely
+    /// printing `--help` does not shell out to nginx.
+    #[arg(long, global = true, value_name = "FILE")]
+    mime_types: Option<String>,
+}
+
 /// Argument parsing and the three subcommands, so a site's `main` is a call.
 pub fn run(site: Site) -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let command = args.next().unwrap_or_else(|| "build".into());
-    let mut out = PathBuf::from("dist");
-    let mut partial_out = PathBuf::from("dist-partial");
-    let mut header = "DP-Partial".to_string();
-    let mut prefix = PathBuf::from(".run");
-    let mut port: u16 = 8080;
-    let mut mime_types = nginx_mime_types();
-
-    while let Some(arg) = args.next() {
-        let mut value = || args.next().unwrap_or_default();
-        match arg.as_str() {
-            "--out" => out = PathBuf::from(value()),
-            "--partial-out" => partial_out = PathBuf::from(value()),
-            "--header" => header = value(),
-            "--prefix" => prefix = PathBuf::from(value()),
-            "--mime-types" => mime_types = value(),
-            "--port" => port = value().parse().unwrap_or(8080),
-            other => {
-                eprintln!("unknown option {other:?}\n\n{USAGE}");
-                return ExitCode::FAILURE;
-            }
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            let _ = e.print();
+            // `--help` and `--version` arrive here too, and asking for them is
+            // not a failure.
+            return if e.use_stderr() { ExitCode::FAILURE } else { ExitCode::SUCCESS };
         }
-    }
+    };
+    let Opts { out, partial_out, header, prefix, port, mime_types } = cli.opts;
+    let mime_types = mime_types.unwrap_or_else(nginx_mime_types);
 
-    match command.as_str() {
-        "check" => match site.check() {
+    match cli.command.unwrap_or(Cmd::Build) {
+        Cmd::Check => match site.check() {
             Ok(()) => {
                 println!("layouts ok");
                 ExitCode::SUCCESS
@@ -418,7 +450,7 @@ pub fn run(site: Site) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        "nginx" => {
+        Cmd::Nginx => {
             let abs = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             print!(
                 "{}",
@@ -433,7 +465,7 @@ pub fn run(site: Site) -> ExitCode {
             );
             ExitCode::SUCCESS
         }
-        "build" => {
+        Cmd::Build => {
             // A layout without its marker builds a site that looks right and
             // behaves wrong, so this is checked rather than documented.
             if let Err(problems) = site.check() {
@@ -460,10 +492,6 @@ pub fn run(site: Site) -> ExitCode {
                     ExitCode::FAILURE
                 }
             }
-        }
-        other => {
-            eprintln!("unknown command {other:?}\n\n{USAGE}");
-            ExitCode::FAILURE
         }
     }
 }
@@ -495,6 +523,47 @@ mod tests {
         assert_eq!(site.render(route, 0).unwrap(), "<r><d><g>P</g></d></r>");
         // The partial is the same markup with the root layer dropped.
         assert_eq!(site.render(route, 1).unwrap(), "<d><g>P</g></d>");
+    }
+
+    #[test]
+    fn cli_is_well_formed_and_takes_the_documented_flags() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+
+        // The subcommand is optional and `build` is what you get without one.
+        let cli = Cli::try_parse_from(["site"]).unwrap();
+        assert!(cli.command.is_none());
+        assert_eq!(cli.opts.out, PathBuf::from("dist"));
+        assert_eq!(cli.opts.partial_out, PathBuf::from("dist-partial"));
+        assert_eq!(cli.opts.header, "DP-Partial");
+        assert_eq!(cli.opts.prefix, PathBuf::from(".run"));
+        assert_eq!(cli.opts.port, 8080);
+        assert!(cli.opts.mime_types.is_none());
+
+        let cli = Cli::try_parse_from([
+            "site",
+            "nginx",
+            "--out",
+            "o",
+            "--partial-out",
+            "p",
+            "--header",
+            "X-Partial",
+            "--prefix",
+            "run",
+            "--port",
+            "9000",
+            "--mime-types",
+            "/m",
+        ])
+        .unwrap();
+        assert!(matches!(cli.command, Some(Cmd::Nginx)));
+        assert_eq!(cli.opts.out, PathBuf::from("o"));
+        assert_eq!(cli.opts.partial_out, PathBuf::from("p"));
+        assert_eq!(cli.opts.header, "X-Partial");
+        assert_eq!(cli.opts.prefix, PathBuf::from("run"));
+        assert_eq!(cli.opts.port, 9000);
+        assert_eq!(cli.opts.mime_types.as_deref(), Some("/m"));
     }
 
     #[test]

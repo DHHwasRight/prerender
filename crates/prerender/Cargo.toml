@@ -6,3 +6,19 @@ rust-version.workspace = true
 
 [dependencies]
 rsx.workspace = true
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+comrak = { version = "0.55", default-features = false }
+gray_matter = { version = "0.3", default-features = false, features = ["yaml"] }
+lightningcss = "1.0.0-alpha.72"
+oxc_allocator = "0.153"
+regex = "1"
+oxc_codegen = "0.153"
+oxc_minifier = "0.153"
+oxc_parser = "0.153"
+oxc_span = "0.153"
+serde = { version = "1", features = ["derive"] }
+serde_norway = "0.9"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+walkdir = "2"
