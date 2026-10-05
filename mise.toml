@@ -1,0 +1,17 @@
+[tools]
+# Must match crates/rsx in ../templ: its proc-macro artifacts are not
+# compatible across patch releases.
+rust = "1.98"
+
+[tasks.build]
+run = "cargo build --workspace"
+
+[tasks.test]
+run = "cargo test --workspace"
+
+[tasks.lint]
+run = "cargo clippy --all-targets -- -D warnings"
+
+[tasks.example]
+description = "Build the three-layout example site into examples/docs/dist"
+run = "cargo run -p docs-site -- build"

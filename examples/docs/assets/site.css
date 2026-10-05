@@ -1,0 +1,117 @@
+/* The nesting is drawn deliberately: each layout gets a visible border and a
+   label, so when a navigation replaces a subtree you can see which one. */
+
+:root {
+  --bg: #fbfaf8;
+  --ink: #1b1a18;
+  --muted: #6b6860;
+  --line: #ddd8cf;
+  --accent: #2f6f4f;
+  --flash: #e8f3ec;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15171a;
+    --ink: #e9e7e3;
+    --muted: #9b968c;
+    --line: #2d3238;
+    --accent: #7fd1a4;
+    --flash: #1d2a23;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+pre { background: color-mix(in srgb, var(--line) 35%, transparent); padding: 0.8rem 1rem; border-radius: 6px; overflow-x: auto; }
+
+/* --- root layout --------------------------------------------------------- */
+
+.site-header {
+  display: flex; align-items: center; gap: 1.5rem;
+  padding: 0.9rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+}
+.brand { letter-spacing: 0.02em; }
+.site-nav { display: flex; gap: 0.25rem; }
+
+.nav-link {
+  color: var(--muted); text-decoration: none;
+  padding: 0.3rem 0.6rem; border-radius: 5px;
+}
+.nav-link:hover { color: var(--ink); background: color-mix(in srgb, var(--line) 40%, transparent); }
+.nav-link.is-current { color: var(--accent); font-weight: 600; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.nav-link.is-ancestor { color: var(--ink); }
+
+#app { padding: 1.5rem; max-width: 70rem; margin: 0 auto; }
+
+.site-footer {
+  padding: 1rem 1.5rem; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 0.85rem;
+}
+
+/* --- nested layouts, drawn so the nesting is legible --------------------- */
+
+[dp-layout] { position: relative; }
+
+[dp-layout]::before {
+  content: attr(dp-layout);
+  position: absolute; top: -0.65rem; left: 0.75rem;
+  padding: 0 0.4rem;
+  background: var(--bg); color: var(--muted);
+  font: 600 0.68rem/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+
+.docs, .guides {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 1.1rem;
+}
+.docs { display: grid; grid-template-columns: 12rem 1fr; gap: 1.25rem; }
+.guides { margin-top: 0.25rem; }
+@media (max-width: 40rem) { .docs { grid-template-columns: 1fr; } }
+
+.docs-sidebar { display: flex; flex-direction: column; gap: 0.15rem; }
+.docs-sidebar h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 0.4rem; }
+.guides-tabs { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+
+.page h1 { margin-top: 0; font-size: 1.5rem; }
+.explainer {
+  border-left: 3px solid var(--accent);
+  padding: 0.5rem 0.9rem; margin-top: 1.5rem;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  font-size: 0.92rem;
+}
+.tag {
+  display: inline-block; margin-right: 0.5rem;
+  font: 600 0.68rem/1.6 ui-monospace, monospace;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent);
+}
+
+/* --- the swap ------------------------------------------------------------ */
+
+/* Applied by boot.js to whichever subtree was actually replaced. Navigating
+   between two guides flashes the guides box; arriving from outside the section
+   flashes the whole docs box. That difference is the point of the example. */
+.is-swapped { animation: swap-in 420ms ease-out; }
+
+@keyframes swap-in {
+  0%   { background-color: var(--flash); opacity: 0.55; transform: translateY(3px); }
+  60%  { background-color: var(--flash); opacity: 1;    transform: none; }
+  100% { background-color: transparent;  opacity: 1;    transform: none; }
+}
+
+/* Honour the setting rather than animating regardless: the swap is still
+   visible through the content changing. */
+@media (prefers-reduced-motion: reduce) {
+  .is-swapped { animation: none; }
+}

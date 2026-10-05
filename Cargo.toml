@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/prerender", "examples/docs"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+
+[workspace.dependencies]
+prerender = { path = "crates/prerender", version = "0.1.0" }
+rsx = { path = "../templ/crates/rsx", version = "0.1.0" }
