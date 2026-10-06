@@ -67,7 +67,8 @@ fn rewrite_components(md: &str) -> String {
     static CLOSE: OnceLock<Regex> = OnceLock::new();
     let close = CLOSE.get_or_init(|| Regex::new(r"</([A-Z][A-Za-z0-9]*)>").unwrap());
 
-    let lines: Vec<String> = md.lines().map(str::to_string).collect();
+    let without_js = strip_javascript(md);
+    let lines: Vec<String> = without_js.lines().map(str::to_string).collect();
     let dedented = dedent_components(&lines).join("\n");
 
     // Replacement runs over whole runs of prose rather than line by line.
@@ -92,7 +93,7 @@ fn rewrite_components(md: &str) -> String {
         let rewritten = close.replace_all(prose, |caps: &regex::Captures<'_>| {
             closing_html(&caps[1]).to_string()
         });
-        out.push_str(&rewrite_open_tags(&rewritten));
+        out.push_str(&sanitize_raw_tags(&rewrite_open_tags(&rewritten)));
         prose.clear();
     };
 
@@ -107,6 +108,121 @@ fn rewrite_components(md: &str) -> String {
         }
     }
     flush(&mut prose, &mut out);
+    out
+}
+
+
+/// Removes the JavaScript an MDX file may carry.
+///
+/// Mintlify pages can be React modules: a `mode: "custom"` landing page starts
+/// with `export function openSearch() {…}`, embeds `{…}` expressions as element
+/// children, and styles with `style={{…}}`. None of that is content, and a
+/// markdown renderer emits all of it as visible text — the Lago welcome page
+/// showed its own event handlers to the reader.
+///
+/// This strips what cannot be rendered rather than attempting to run it. A
+/// page built mostly from JSX will come out sparse; it will not come out as a
+/// listing of someone's click handler.
+fn strip_javascript(md: &str) -> String {
+    let mut out = String::with_capacity(md.len());
+    let mut depth = 0usize;
+    let mut skipping_statement = false;
+    let mut skipping_until: Option<&'static str> = None;
+
+    for (line, in_code) in fenced_lines(md) {
+        if in_code {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+
+        let trimmed = line.trim_start();
+
+        // A <script> or <style> block is page machinery, and its body is not
+        // markup the renderer should show. The JSON-LD block on Lago's welcome
+        // page was otherwise printed to the reader in full.
+        if let Some(close) = skipping_until {
+            if trimmed.contains(close) {
+                skipping_until = None;
+            }
+            continue;
+        }
+        for (open, close) in [("<script", "</script>"), ("<style", "</style>")] {
+            if trimmed.starts_with(open) {
+                if !trimmed.contains(close) {
+                    skipping_until = Some(close);
+                }
+                break;
+            }
+        }
+        if skipping_until.is_some() || trimmed.starts_with("<script") || trimmed.starts_with("<style") {
+            continue;
+        }
+
+        // `export`/`import` at the top level introduce a module, not prose.
+        if depth == 0 && !skipping_statement {
+            if trimmed.starts_with("export ") || trimmed.starts_with("import ") {
+                skipping_statement = true;
+            }
+            // A line opening with a brace between tags is an expression, not
+            // text; prose does not begin a paragraph with `{`.
+            else if trimmed.starts_with('{') {
+                skipping_statement = true;
+            }
+        }
+
+        if skipping_statement {
+            depth = depth
+                .saturating_add(line.matches('{').count())
+                .saturating_sub(line.matches('}').count());
+            if depth == 0 {
+                skipping_statement = false;
+            }
+            continue;
+        }
+
+        out.push_str(&strip_expression_children(line));
+        out.push('\n');
+    }
+    out
+}
+
+/// Drops `{…}` runs that sit between tags, which in MDX are JavaScript
+/// expressions rather than text. A brace in ordinary prose is left alone,
+/// since it is only an expression when it follows markup.
+fn strip_expression_children(line: &str) -> String {
+    if !line.contains('{') {
+        return line.to_string();
+    }
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < line.len() {
+        if bytes[i] == b'{' && out.trim_end().ends_with('>') {
+            let mut depth = 0usize;
+            let mut j = i;
+            while j < line.len() {
+                match bytes[j] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            if depth == 0 && j < line.len() {
+                i = j + 1;
+                continue;
+            }
+        }
+        let ch = line[i..].chars().next().expect("non-empty remainder");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
     out
 }
 
@@ -188,8 +304,12 @@ fn fence_marker(trimmed: &str) -> Option<String> {
     None
 }
 
-/// The component name and last line of an opening tag starting on line `i`,
-/// when that line begins one.
+/// The tag name and last line of an opening tag starting on line `i`, when
+/// that line begins one.
+///
+/// Lowercase tags count too. Raw HTML in MDX is indented for readability just
+/// as components are, and four spaces is an indented code block — the Lago
+/// welcome page printed its own card markup to the reader as a code listing.
 ///
 /// The tag is scanned rather than pattern-matched on the line, because an
 /// opening tag routinely spans many lines — a `<Card>` whose `icon={…}` holds
@@ -198,12 +318,17 @@ fn fence_marker(trimmed: &str) -> Option<String> {
 /// block to CommonMark, so the content came out as a literal listing.
 fn open_block_at(lines: &[String], i: usize) -> Option<(String, usize)> {
     let trimmed = lines[i].trim_start();
-    if !trimmed.starts_with('<') || !trimmed[1..].starts_with(|c: char| c.is_ascii_uppercase()) {
+    if !trimmed.starts_with('<') || !trimmed[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
         return None;
     }
     let indent = lines[i].len() - trimmed.len();
     let rest = lines[i..].join("\n");
-    let (name, _attrs, self_closing, end) = scan_tag(&rest, indent)?;
+    let (name, _attrs, self_closing, end) = scan_tag_any(&rest, indent)?;
+    // Whitespace is content in these, so their indentation is not ours to
+    // normalise.
+    if matches!(name.as_str(), "pre" | "code" | "textarea") {
+        return None;
+    }
     if self_closing {
         return None;
     }
@@ -240,13 +365,32 @@ fn find_close(lines: &[String], open_last: usize, tag: &str) -> Option<usize> {
     None
 }
 
+/// The indentation to strip from a block's interior.
+///
+/// Measured from the prose, not from nested tags. A `<Frame>` sitting at a
+/// shallower indent than the paragraphs around it dragged the baseline down,
+/// and the text that had been four spaces deeper landed at exactly four —
+/// which CommonMark reads as a code block. Lists and bold inside those blocks
+/// came out as literal text on a dozen pages.
+///
+/// Nested tags are dedented by their own recursion, so excluding them here
+/// costs nothing.
 fn min_indent(lines: &[String]) -> usize {
-    lines
+    let indent = |l: &String| l.len() - l.trim_start().len();
+    let is_tag = |l: &String| {
+        let t = l.trim_start();
+        t.starts_with("</") || (t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic()))
+    };
+
+    let prose = lines
         .iter()
-        .filter(|l| !l.trim().is_empty())
-        .map(|l| l.len() - l.trim_start().len())
-        .min()
-        .unwrap_or(0)
+        .filter(|l| !l.trim().is_empty() && !is_tag(l))
+        .map(indent)
+        .min();
+
+    prose.unwrap_or_else(|| {
+        lines.iter().filter(|l| !l.trim().is_empty()).map(indent).min().unwrap_or(0)
+    })
 }
 
 fn strip_indent(line: &str, shift: usize) -> String {
@@ -334,6 +478,153 @@ fn scan_tag(src: &str, start: usize) -> Option<(String, String, bool, usize)> {
                     let self_closing = attrs.trim_end().ends_with('/');
                     let attrs = attrs.trim_end().trim_end_matches('/');
                     return Some((name.to_string(), attrs.to_string(), self_closing, i + 1));
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    None
+}
+
+
+/// Rewrites raw HTML tags to drop attributes a browser cannot use.
+///
+/// MDX pages carry React attributes — `className`, `style={{…}}`, and event
+/// handlers whose values are whole functions. A handler written across several
+/// lines contains a blank line, which ends the HTML block as far as CommonMark
+/// is concerned, and the remainder of the function is printed to the reader as
+/// prose. Dropping them removes both the noise and the thing that breaks the
+/// block, and `className` becomes `class` so the markup is at least styleable.
+fn sanitize_raw_tags(prose: &str) -> String {
+    const KEEP: [&str; 8] = ["href", "src", "alt", "id", "title", "colspan", "rowspan", "lang"];
+
+    let mut out = String::with_capacity(prose.len());
+    let mut i = 0;
+    while i < prose.len() {
+        let rest = &prose[i..];
+        if rest.starts_with('<') && rest[1..].starts_with(|c: char| c.is_ascii_lowercase()) {
+            if let Some((name, attrs, self_closing, end)) = scan_tag_any(prose, i) {
+                if attrs.contains('{') || attrs.contains("className") {
+                    out.push('<');
+                    out.push_str(&name);
+                    for (key, value) in attributes(&attrs) {
+                        let key = if key.eq_ignore_ascii_case("classname") { "class" } else { &key };
+                        if KEEP.contains(&key) || key == "class" {
+                            out.push_str(&format!(" {key}=\"{}\"", escape_text(&value)));
+                        }
+                    }
+                    if self_closing {
+                        out.push_str(" /");
+                    }
+                    out.push('>');
+                    i = end;
+                    continue;
+                }
+            }
+        }
+        let ch = rest.chars().next().expect("non-empty remainder");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+/// Quoted attributes only. A braced JSX value has no HTML equivalent, so it is
+/// skipped rather than guessed at.
+fn attributes(attrs: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    let bytes = attrs.as_bytes();
+    let mut i = 0;
+    while i < attrs.len() {
+        while i < attrs.len() && !bytes[i].is_ascii_alphabetic() {
+            i += 1;
+        }
+        let start = i;
+        while i < attrs.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
+            i += 1;
+        }
+        if start == i {
+            break;
+        }
+        let key = &attrs[start..i];
+        while i < attrs.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i < attrs.len() && bytes[i] == b'=' {
+            i += 1;
+            while i < attrs.len() && bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if i < attrs.len() && bytes[i] == b'"' {
+                let value_start = i + 1;
+                if let Some(close) = attrs[value_start..].find('"') {
+                    found.push((key.to_string(), attrs[value_start..value_start + close].to_string()));
+                    i = value_start + close + 1;
+                    continue;
+                }
+            }
+            // Braced or unquoted: skip the value entirely.
+            let mut depth = 0usize;
+            while i < attrs.len() {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    b' ' if depth == 0 => break,
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+    }
+    found
+}
+
+/// As [`scan_tag`], without requiring the name to start uppercase.
+fn scan_tag_any(src: &str, start: usize) -> Option<(String, String, bool, usize)> {
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'<') {
+        return None;
+    }
+    let mut i = start + 1;
+    let name_start = i;
+    while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'-') {
+        i += 1;
+    }
+    let name = &src[name_start..i];
+    if name.is_empty() {
+        return None;
+    }
+    let attrs_start = i;
+    let mut quote: Option<u8> = None;
+    let mut braces = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                b'"' | b'\'' => quote = Some(c),
+                b'{' => braces += 1,
+                b'}' => braces = braces.saturating_sub(1),
+                b'>' if braces == 0 => {
+                    let attrs = &src[attrs_start..i];
+                    let self_closing = attrs.trim_end().ends_with('/');
+                    return Some((
+                        name.to_string(),
+                        attrs.trim_end().trim_end_matches('/').to_string(),
+                        self_closing,
+                        i + 1,
+                    ));
                 }
                 _ => {}
             },
@@ -718,6 +1009,18 @@ mod tests {
     }
 
     #[test]
+    fn a_nested_tag_does_not_drag_the_baseline_down() {
+        // The <Frame> sits shallower than the prose. Measuring the baseline
+        // from it left the list at four spaces, i.e. a code block.
+        let html = md(
+            "<Tab title=\"Dashboard\">\n      To create one:\n\n        1. Open the **Features** page;\n\n    <Frame caption=\"x\">\n      shot\n    </Frame>\n</Tab>\n",
+        );
+        assert!(html.contains("<ol"), "list should render: {html}");
+        assert!(html.contains("<strong>Features</strong>"), "bold should render: {html}");
+        assert!(!html.contains("1. Open the **Features**"), "literal text: {html}");
+    }
+
+    #[test]
     fn nested_components_are_dedented_at_each_level() {
         let html = md("<Tabs>\n  <Tab title=\"One\">\n      # Heading\n  </Tab>\n</Tabs>\n");
         assert!(html.contains("<h1"), "nested heading should render: {html}");
@@ -768,6 +1071,30 @@ mod tests {
             html.matches("</div>").count(),
             "unbalanced divs: {html}"
         );
+    }
+
+    #[test]
+    fn module_statements_do_not_reach_the_page() {
+        let html = md("export function openSearch() {\n  document.getElementById('x').click();\n}\n\nReal prose.\n");
+        assert!(!html.contains("openSearch"), "{html}");
+        assert!(!html.contains("getElementById"), "{html}");
+        assert!(html.contains("Real prose."), "{html}");
+    }
+
+    #[test]
+    fn jsx_expression_children_are_dropped_but_prose_braces_are_not() {
+        let html = md("<div>{ const d = x ? 'a' : 'b'; }</div>\n\nUse {curly} braces in prose.\n");
+        assert!(!html.contains("const d"), "expression leaked: {html}");
+        assert!(html.contains("{curly}"), "prose braces were eaten: {html}");
+    }
+
+    #[test]
+    fn a_fenced_block_keeps_its_javascript() {
+        // Only unfenced JavaScript is module code; inside a fence it is the
+        // documentation's subject matter.
+        let html = md("```js\nexport function demo() { return 1; }\n```\n");
+        assert!(html.contains("export"), "{html}");
+        assert!(html.contains("demo"), "{html}");
     }
 
     #[test]
