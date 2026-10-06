@@ -349,11 +349,19 @@ impl Site {
              \x20       # Anything the partial tree does not hold falls back to the\n\
              \x20       # full one, so a partial request for a path that was never\n\
              \x20       # built twice still resolves instead of 404ing.\n\
+             \x20       #\n\
+             \x20       # The 404 page is deliberately NOT a try_files candidate.\n\
+             \x20       # Listing it there serves it with status 200, so a client\n\
+             \x20       # asking for a fragment is handed a whole document and\n\
+             \x20       # swaps it into the middle of the page it is showing --\n\
+             \x20       # which looks like the header appearing twice. Falling\n\
+             \x20       # through to =404 lets error_page answer, which keeps the\n\
+             \x20       # status and resolves against the tree that was asked for.\n\
              \x20       location @full {{\n\
              \x20           root {full};\n\
              \x20           add_header Vary {header} always;\n\
              \x20           add_header Cache-Control \"no-cache\" always;\n\
-             \x20           try_files $uri $uri/index.html /404/index.html =404;\n\
+             \x20           try_files $uri $uri/index.html =404;\n\
              \x20       }}\n\
              \n\
              \x20       # A 404 answered to a partial request must itself be a\n\
