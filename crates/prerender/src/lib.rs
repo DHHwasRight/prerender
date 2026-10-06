@@ -108,6 +108,7 @@ pub struct Site {
     layouts: Vec<LayoutDef>,
     routes: Vec<RouteDef>,
     statics: Vec<PathBuf>,
+    generated: Vec<(String, String)>,
 }
 
 impl Site {
@@ -136,6 +137,16 @@ impl Site {
     /// into the partial tree would only create a second copy nothing asks for.
     pub fn static_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.statics.push(dir.into());
+        self
+    }
+
+    /// Writes a generated file into the full tree.
+    ///
+    /// For assets that are produced rather than authored — a syntax-highlight
+    /// stylesheet derived from the theme, a sitemap — which would otherwise
+    /// have to be committed and kept in sync by hand.
+    pub fn static_file(mut self, path: impl Into<String>, contents: impl Into<String>) -> Self {
+        self.generated.push((path.into(), contents.into()));
         self
     }
 
@@ -198,6 +209,14 @@ impl Site {
         }
         for dir in &self.statics {
             report.assets += copy_dir(dir, out)?;
+        }
+        for (path, contents) in &self.generated {
+            let target = out.join(path.trim_start_matches('/'));
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(target, contents)?;
+            report.assets += 1;
         }
         Ok(report)
     }

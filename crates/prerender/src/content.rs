@@ -64,32 +64,195 @@ pub struct Doc {
 /// * Fenced code blocks contain tags that look identical and must not be
 ///   rewritten, or every JSX sample in the documentation is silently corrupted.
 fn rewrite_components(md: &str) -> String {
-    static OPEN: OnceLock<Regex> = OnceLock::new();
     static CLOSE: OnceLock<Regex> = OnceLock::new();
-    // Attribute values may contain `>`, so the value alternatives are matched
-    // before the bare-character fallback.
-    let open = OPEN.get_or_init(|| {
-        Regex::new(r#"(?s)<([A-Z][A-Za-z0-9]*)((?:\s+[^>"']*(?:"[^"]*"|'[^']*')?)*?)\s*(/?)>"#).unwrap()
-    });
     let close = CLOSE.get_or_init(|| Regex::new(r"</([A-Z][A-Za-z0-9]*)>").unwrap());
 
-    let mut out = String::with_capacity(md.len() + md.len() / 8);
-    for (line, in_code) in fenced_lines(md) {
-        if in_code {
-            out.push_str(line);
-            out.push('\n');
-            continue;
+    let lines: Vec<String> = md.lines().map(str::to_string).collect();
+    let dedented = dedent_components(&lines).join("\n");
+
+    // Replacement runs over whole runs of prose rather than line by line.
+    // Tags are routinely written across several lines --
+    //
+    // ```text
+    //   <Card
+    //     title="Billing"
+    //     icon="receipt">
+    // ```
+    //
+    // -- and a per-line regex cannot match one. Those survived into the output
+    // as unknown elements, which the HTML parser then nested everything else
+    // inside, pulling the whole document out of shape.
+    let mut out = String::with_capacity(dedented.len() + dedented.len() / 8);
+    let mut prose = String::new();
+
+    let flush = |prose: &mut String, out: &mut String| {
+        if prose.is_empty() {
+            return;
         }
-        let rewritten = close.replace_all(line, |caps: &regex::Captures<'_>| {
+        let rewritten = close.replace_all(prose, |caps: &regex::Captures<'_>| {
             closing_html(&caps[1]).to_string()
         });
-        let rewritten = open.replace_all(&rewritten, |caps: &regex::Captures<'_>| {
-            opening_html(&caps[1], &caps[2], !caps[3].is_empty())
-        });
-        out.push_str(&rewritten);
-        out.push('\n');
+        out.push_str(&rewrite_open_tags(&rewritten));
+        prose.clear();
+    };
+
+    for (line, in_code) in fenced_lines(&dedented) {
+        if in_code {
+            flush(&mut prose, &mut out);
+            out.push_str(line);
+            out.push('\n');
+        } else {
+            prose.push_str(line);
+            prose.push('\n');
+        }
+    }
+    flush(&mut prose, &mut out);
+    out
+}
+
+/// Strips the indentation MDX authors put inside component tags.
+///
+/// Content is routinely written as
+///
+/// ```text
+///   <Tab title="Dashboard">
+///       1. Access the **"Coupons"** section
+///   </Tab>
+/// ```
+///
+/// which MDX renders as a list. CommonMark does not: four spaces makes an
+/// indented code block, so every list, heading and emphasis inside a component
+/// would come out as literal text. Mintlify strips this; so must we, or the
+/// markdown inside 235 `<Tab>`s and 118 `<Step>`s is lost.
+///
+/// The interior of each block is shifted left by its own smallest indent, then
+/// the same treatment is applied to anything nested inside it.
+fn dedent_components(lines: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    let mut fence: Option<String> = None;
+
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if let Some(marker) = fence_marker(trimmed) {
+            match &fence {
+                Some(open) if *open == marker => fence = None,
+                Some(_) => {}
+                None => fence = Some(marker),
+            }
+            out.push(lines[i].clone());
+            i += 1;
+            continue;
+        }
+        if fence.is_some() {
+            out.push(lines[i].clone());
+            i += 1;
+            continue;
+        }
+
+        match open_block_at(lines, i).and_then(|(tag, last)| {
+            find_close(lines, last, &tag).map(|close| (last, close))
+        }) {
+            Some((last, close)) => {
+                // The tag itself may span several lines; all of them are
+                // emitted flush left so the rewriter sees one tag.
+                let shift_tag = lines[i].len() - lines[i].trim_start().len();
+                for line in &lines[i..=last] {
+                    out.push(strip_indent(line, shift_tag));
+                }
+                let interior = &lines[last + 1..close];
+                let shift = min_indent(interior);
+                let dedented: Vec<String> = interior
+                    .iter()
+                    .map(|line| strip_indent(line, shift))
+                    .collect();
+                out.extend(dedent_components(&dedented));
+                out.push(lines[close].trim_start().to_string());
+                i = close + 1;
+            }
+            None => {
+                out.push(lines[i].clone());
+                i += 1;
+            }
+        }
     }
     out
+}
+
+fn fence_marker(trimmed: &str) -> Option<String> {
+    for marker in ["```", "~~~"] {
+        if trimmed.starts_with(marker) {
+            return Some(marker.to_string());
+        }
+    }
+    None
+}
+
+/// The component name and last line of an opening tag starting on line `i`,
+/// when that line begins one.
+///
+/// The tag is scanned rather than pattern-matched on the line, because an
+/// opening tag routinely spans many lines — a `<Card>` whose `icon={…}` holds
+/// an inline SVG runs to thirty. Treating only single-line tags as blocks left
+/// those bodies undedented, and a four-space-indented body is an indented code
+/// block to CommonMark, so the content came out as a literal listing.
+fn open_block_at(lines: &[String], i: usize) -> Option<(String, usize)> {
+    let trimmed = lines[i].trim_start();
+    if !trimmed.starts_with('<') || !trimmed[1..].starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+    let indent = lines[i].len() - trimmed.len();
+    let rest = lines[i..].join("\n");
+    let (name, _attrs, self_closing, end) = scan_tag(&rest, indent)?;
+    if self_closing {
+        return None;
+    }
+    // Anything after the tag on its last line means it is inline prose, not a
+    // block wrapper, and dedenting around it would reflow the sentence.
+    let last = i + rest[..end].matches('\n').count();
+    if !rest[end..].lines().next().unwrap_or("").trim().is_empty() {
+        return None;
+    }
+    Some((name, last))
+}
+
+/// The line holding the close tag matching an opener that ends on `open_last`.
+///
+/// Scanning starts after the opener and at depth one, because a tag spanning
+/// several lines does not begin on the line it ends on — counting it again
+/// would never balance.
+fn find_close(lines: &[String], open_last: usize, tag: &str) -> Option<usize> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut depth = 1usize;
+    for (offset, line) in lines.iter().enumerate().skip(open_last + 1) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&open) && !trimmed.trim_end().ends_with("/>") {
+            depth += 1;
+        }
+        if trimmed.starts_with(&close) {
+            depth -= 1;
+            if depth == 0 {
+                return Some(offset);
+            }
+        }
+    }
+    None
+}
+
+fn min_indent(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0)
+}
+
+fn strip_indent(line: &str, shift: usize) -> String {
+    let indent = line.len() - line.trim_start().len();
+    // Only leading ASCII whitespace is removed, so slicing stays on a boundary.
+    line[shift.min(indent)..].to_string()
 }
 
 /// Yields each line with whether it sits inside a fenced code block. The fence
@@ -115,6 +278,91 @@ fn fenced_lines(md: &str) -> impl Iterator<Item = (&str, bool)> {
             (None, None) => (line, false),
         }
     })
+}
+
+
+/// Finds the end of a component tag that starts at `start`.
+///
+/// Returns the tag name, its attribute text, whether it self-closes, and the
+/// byte index just past the closing `>`.
+///
+/// A regex cannot do this. Attributes are JSX, so a value may be a braced
+/// expression containing arbitrary markup:
+///
+/// ```text
+///   <Card title="GoCardless" icon={ <svg width="32">…</svg> }>
+/// ```
+///
+/// Matching to the first `>` ends the tag inside the `<svg>`, which splits the
+/// component in half and leaves the rest of the document unbalanced — the
+/// article element closes early and every later block escapes its container.
+/// So braces and quotes are tracked, and only a `>` at brace depth zero and
+/// outside a string ends the tag.
+fn scan_tag(src: &str, start: usize) -> Option<(String, String, bool, usize)> {
+    let bytes = src.as_bytes();
+    if bytes.get(start) != Some(&b'<') {
+        return None;
+    }
+
+    let mut i = start + 1;
+    let name_start = i;
+    while i < bytes.len() && bytes[i].is_ascii_alphanumeric() {
+        i += 1;
+    }
+    let name = &src[name_start..i];
+    if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_uppercase()) {
+        return None;
+    }
+
+    let attrs_start = i;
+    let mut quote: Option<u8> = None;
+    let mut braces = 0usize;
+    while i < bytes.len() {
+        let c = bytes[i];
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                b'"' | b'\'' => quote = Some(c),
+                b'{' => braces += 1,
+                b'}' => braces = braces.saturating_sub(1),
+                b'>' if braces == 0 => {
+                    let attrs = &src[attrs_start..i];
+                    let self_closing = attrs.trim_end().ends_with('/');
+                    let attrs = attrs.trim_end().trim_end_matches('/');
+                    return Some((name.to_string(), attrs.to_string(), self_closing, i + 1));
+                }
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Rewrites every opening component tag in a run of prose.
+fn rewrite_open_tags(prose: &str) -> String {
+    let mut out = String::with_capacity(prose.len());
+    let mut i = 0;
+    while i < prose.len() {
+        let rest = &prose[i..];
+        if rest.starts_with('<')
+            && rest[1..].starts_with(|c: char| c.is_ascii_uppercase())
+        {
+            if let Some((name, attrs, self_closing, end)) = scan_tag(prose, i) {
+                out.push_str(&opening_html(&name, &attrs, self_closing));
+                i = end;
+                continue;
+            }
+        }
+        let ch = rest.chars().next().expect("non-empty remainder");
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
 }
 
 /// How a component maps onto HTML: the class suffix, and whether it is a
@@ -457,6 +705,69 @@ mod tests {
     fn self_closing_components_do_not_swallow_the_rest_of_the_page() {
         let html = md("<Icon name=\"check\" />\n\nAfter the icon.\n");
         assert!(html.contains("After the icon."), "{html}");
+    }
+
+    #[test]
+    fn markdown_indented_inside_a_component_is_still_markdown() {
+        // MDX authors indent inside tags; CommonMark reads four spaces as a
+        // code block, so without dedenting this list is literal text.
+        let html = md("<Tab title=\"Dashboard\">\n    To create one:\n\n    1. Access the **list**;\n    2. Click add;\n</Tab>\n");
+        assert!(html.contains("<ol"), "list should render: {html}");
+        assert!(html.contains("<strong>list</strong>"), "emphasis should render: {html}");
+        assert!(!html.contains("<pre"), "should not become a code block: {html}");
+    }
+
+    #[test]
+    fn nested_components_are_dedented_at_each_level() {
+        let html = md("<Tabs>\n  <Tab title=\"One\">\n      # Heading\n  </Tab>\n</Tabs>\n");
+        assert!(html.contains("<h1"), "nested heading should render: {html}");
+    }
+
+    #[test]
+    fn code_blocks_inside_components_keep_their_own_indentation() {
+        let html = md("<Tab title=\"Shell\">\n    ```bash\n    if true; then\n      echo hi\n    fi\n    ```\n</Tab>\n");
+        // The fence is dedented with its block, but the relative indent inside
+        // the sample must survive or every nested snippet is reflowed.
+        assert!(html.contains("echo hi"), "{html}");
+        assert!(html.contains("  echo hi") || html.contains("  <span"), "relative indent lost: {html}");
+    }
+
+    #[test]
+    fn a_tag_written_across_several_lines_is_rewritten() {
+        // These survived a per-line regex and reached the browser as unknown
+        // elements, which then nested the rest of the document inside them.
+        let html = md("<Card\n  title=\"Billing\"\n  icon=\"receipt\">\n  Body.\n</Card>\n");
+        assert!(html.contains(r#"<div class="mdx mdx-card">"#), "{html}");
+        assert!(html.contains("Billing"), "{html}");
+        assert!(!html.to_lowercase().contains("<card"), "raw tag survived: {html}");
+    }
+
+    #[test]
+    fn no_capitalised_tag_survives_a_realistic_block() {
+        let html = md(
+            "<CardGroup cols={2}>\n  <Card\n    title=\"One\"\n    icon=\"x\"\n  >\n    ```bash\n    echo hi\n    ```\n  </Card>\n</CardGroup>\n",
+        );
+        assert!(!regex::Regex::new(r"<[A-Z]").unwrap().is_match(&html), "{html}");
+        assert!(html.contains("echo hi"), "{html}");
+    }
+
+    #[test]
+    fn a_jsx_expression_attribute_containing_markup_does_not_split_the_tag() {
+        // This is what broke the real site: the `>` inside the <svg> ended the
+        // Card tag early, the rest of the document escaped its container, and
+        // the page scrolled sideways by thirty thousand pixels.
+        let html = md(
+            "<Card\n  title=\"GoCardless\"\n  icon={\n    <svg width=\"32\" height=\"32\"><path d=\"M1 2\"/></svg>\n  }\n>\n  Body text.\n</Card>\n",
+        );
+        assert!(html.contains(r#"<div class="mdx mdx-card">"#), "{html}");
+        assert!(html.contains("GoCardless"), "{html}");
+        assert!(html.contains("Body text."), "{html}");
+        assert!(!html.contains("<svg"), "icon markup leaked into the page: {html}");
+        assert_eq!(
+            html.matches("<div").count(),
+            html.matches("</div>").count(),
+            "unbalanced divs: {html}"
+        );
     }
 
     #[test]
