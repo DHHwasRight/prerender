@@ -109,6 +109,7 @@ pub struct Site {
     routes: Vec<RouteDef>,
     statics: Vec<PathBuf>,
     generated: Vec<(String, String)>,
+    redirects: Vec<(String, String)>,
 }
 
 impl Site {
@@ -138,6 +139,22 @@ impl Site {
     pub fn static_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.statics.push(dir.into());
         self
+    }
+
+    /// Sends one path to another with a 301.
+    ///
+    /// A section prefix such as `/guide/plans/charges` is a path segment with
+    /// no page of its own, yet content links to it as though it were one. The
+    /// alternative to a redirect is building an index page nobody wrote, which
+    /// then has to be kept in step with whatever it was supposed to summarise.
+    pub fn redirect(mut self, from: impl Into<String>, to: impl Into<String>) -> Self {
+        self.redirects.push((from.into(), to.into()));
+        self
+    }
+
+    /// Every redirect, for a caller that wants to check them.
+    pub fn redirects(&self) -> &[(String, String)] {
+        &self.redirects
     }
 
     /// Writes a generated file into the full tree.
@@ -323,6 +340,7 @@ impl Site {
              \x20   server {{\n\
              \x20       listen {port};\n\
              \x20       root   $prerender_root;\n\
+             {redirects}\
              \n\
              \x20       # Assets are built once, not twice, so they never vary on\n\
              \x20       # the header and are always read from the full tree.\n\
@@ -381,8 +399,24 @@ impl Site {
             port = cfg.port,
             full = cfg.full.display(),
             partial = cfg.partial.display(),
+            redirects = self.redirect_block(),
         );
         s
+    }
+
+    /// Exact-match redirect locations, which nginx resolves before any prefix
+    /// location, so they cost nothing on the pages that are not redirects.
+    fn redirect_block(&self) -> String {
+        if self.redirects.is_empty() {
+            return String::new();
+        }
+        let mut out = String::from("\n        # Section prefixes that content links to but that have no page.\n");
+        for (from, to) in &self.redirects {
+            let _ = writeln!(out, "        location = {from} {{ return 301 {to}; }}");
+            // Both spellings, since a link may or may not carry the slash.
+            let _ = writeln!(out, "        location = {from}/ {{ return 301 {to}; }}");
+        }
+        out
     }
 }
 
