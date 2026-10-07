@@ -1,0 +1,247 @@
+/* A mid-fidelity wireframe. Everything is a rectangle; the only colour comes
+ * from the five-swatch palette, used to tell cards apart rather than to
+ * decorate. The point is to see which rectangles get replaced on a click.
+ */
+
+:root {
+  --c1: #cdb4db;
+  --c2: #ffc8dd;
+  --c3: #ffafcc;
+  --c4: #bde0fe;
+  --c5: #a2d2ff;
+
+  --ink: #2b2b31;
+  --muted: #9aa0a6;
+  --line: #dfe1e5;
+  --ground: #f4f5f7;
+  --panel: #ffffff;
+  --placeholder: #e7e9ec;
+
+  --radius: 10px;
+  --gap: 16px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font: 500 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { text-decoration: none; color: inherit; }
+
+/* Placeholder copy. Wireframes do not need words, and words here would only
+ * distract from which block moved. */
+.line {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--placeholder);
+  margin-top: 8px;
+}
+.line.short { width: 55%; }
+
+/* ---------------------------------------------------------------- layer 1 */
+
+.frame {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--gap);
+  padding: var(--gap);
+  min-height: 100vh;
+  align-items: start;
+}
+
+.rail {
+  position: sticky;
+  top: var(--gap);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+.rail-mark {
+  height: 30px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--c1), var(--c4));
+}
+.rail-nav { display: grid; gap: 4px; }
+.rail-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.rail-link:hover { background: var(--ground); color: var(--ink); }
+.rail-link.is-current { background: var(--ground); color: var(--ink); font-weight: 650; }
+.dot { width: 10px; height: 10px; border-radius: 3px; flex: 0 0 auto; }
+.rail-foot { height: 52px; border-radius: 8px; background: var(--placeholder); }
+
+.stage { min-width: 0; }
+
+/* ---------------------------------------------------------------- layer 2 */
+
+.section { display: grid; gap: var(--gap); }
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.bar-title { font-weight: 650; }
+.bar-fill { flex: 1 1 auto; height: 8px; border-radius: 4px; background: var(--placeholder); }
+.chip { width: 54px; height: 24px; border-radius: 6px; background: var(--placeholder); }
+
+/* The board is one element in two states. Which state is decided by the
+ * layout, because the layout is what re-renders when a card opens or closes. */
+.board { min-width: 0; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--gap);
+}
+
+.card {
+  display: block;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  animation: rise 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.card:hover { border-color: var(--tint); transform: translateY(-2px); }
+.card-top {
+  display: block;
+  height: 64px;
+  border-radius: 8px;
+  background: var(--tint);
+  margin-bottom: 12px;
+}
+.card-title { font-weight: 650; }
+
+/* Stagger, so the grid assembles rather than appearing at once. */
+.card:nth-child(1) { animation-delay: 0ms; }
+.card:nth-child(2) { animation-delay: 30ms; }
+.card:nth-child(3) { animation-delay: 60ms; }
+.card:nth-child(4) { animation-delay: 90ms; }
+.card:nth-child(5) { animation-delay: 120ms; }
+.card:nth-child(6) { animation-delay: 150ms; }
+
+/* ---------------------------------------------------------------- layer 3 */
+
+.split {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--gap);
+  align-items: start;
+}
+@media (max-width: 900px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+.detail {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--tint);
+  border-radius: var(--radius);
+  padding: 16px;
+  min-width: 0;
+  /* Reads as the card growing into place rather than a new page arriving. */
+  animation: expand 320ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.detail-head { display: flex; align-items: center; gap: 10px; }
+.swatch { width: 26px; height: 26px; border-radius: 6px; flex: 0 0 auto; }
+.swatch.sm { width: 16px; height: 16px; border-radius: 4px; }
+.detail-title { font-weight: 650; font-size: 16px; }
+.close {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--placeholder);
+}
+.close:hover { background: var(--c3); }
+
+.tabs { display: flex; gap: 6px; margin: 14px 0; }
+.tab { padding: 6px 12px; border-radius: 999px; background: var(--ground); color: var(--muted); }
+.tab:hover { color: var(--ink); }
+.tab.is-current { background: var(--tint); color: var(--ink); font-weight: 650; }
+
+.detail-body { min-height: 220px; }
+.panel { animation: fade 200ms ease-out both; }
+.panel-label {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.blocks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; }
+.block { height: 72px; border-radius: 8px; opacity: 0.75; }
+
+/* The cards that were not opened, collapsed to a list. */
+.siblings {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.sibling {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  animation: slide-in 280ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+.sibling:hover { border-color: var(--c5); }
+.sibling.is-current { border-color: var(--c3); }
+.sibling-name { font-weight: 600; }
+.sibling:nth-child(1) { animation-delay: 40ms; }
+.sibling:nth-child(2) { animation-delay: 70ms; }
+.sibling:nth-child(3) { animation-delay: 100ms; }
+.sibling:nth-child(4) { animation-delay: 130ms; }
+.sibling:nth-child(5) { animation-delay: 160ms; }
+
+/* ------------------------------------------------------------- animations */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes expand {
+  from { opacity: 0; transform: scale(0.94); transform-origin: top left; }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* boot.js marks whichever region was actually swapped, which is the whole
+ * point of the example: the outline shows how much of the page changed. */
+.is-swapped { animation: flash 600ms ease-out; }
+@keyframes flash {
+  0%   { outline: 2px solid var(--c3); outline-offset: 4px; }
+  70%  { outline: 2px solid var(--c3); outline-offset: 4px; }
+  100% { outline: 2px solid transparent; outline-offset: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

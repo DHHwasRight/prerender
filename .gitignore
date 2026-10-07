@@ -3,3 +3,6 @@ dist/
 dist-partial/
 .run/
 .DS_Store
+node_modules/
+test-results/
+.run-test/

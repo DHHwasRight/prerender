@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/prerender", "examples/docs"]
+members = ["crates/prerender", "examples/docs", "examples/nested-cards"]
 
 [workspace.package]
 version = "0.1.0"
