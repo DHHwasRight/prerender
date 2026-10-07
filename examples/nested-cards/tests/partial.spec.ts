@@ -58,7 +58,10 @@ test("opening a card replaces the board but keeps the section bar", async ({ pag
   expect(await kept(page, ".bar"), "section bar survives").toBe(1);
   expect(await kept(page, ".grid"), "the grid is replaced").toBe(0);
   await expect(page.locator(".split .detail")).toBeVisible();
-  await expect(page.locator(".siblings .sibling")).toHaveCount(5);
+  await expect(page.locator(".siblings .sibling")).toHaveCount(6);
+  // The open card stays in the list and is marked, rather than vanishing from
+  // it — a list that reshuffles under the pointer is hard to use.
+  await expect(page.locator(".siblings .sibling.is-current")).toHaveText(/Alpha 2/);
 });
 
 test("switching panels inside a card replaces only the panel", async ({ page }) => {
@@ -77,8 +80,11 @@ test("switching panels inside a card replaces only the panel", async ({ page }) 
   expect(await kept(page, ".detail-head"), "the card header survives").toBe(1);
   expect(await kept(page, ".siblings"), "the sibling list survives").toBe(1);
   expect(await kept(page, ".bar"), "section bar survives").toBe(1);
-  // Nothing outside the panel moved, which is the finest swap this site does.
-  expect(await kept(page, ".tabs"), "the tab strip survives").toBe(1);
+  // The tab strip is the one exception, and deliberately so: it sits outside
+  // the swapped region but its highlight has to move, so the response carries
+  // an out-of-band replacement for it.
+  expect(await kept(page, ".tabs"), "the tab strip is replaced out of band").toBe(0);
+  await expect(page.locator(".tab.is-current")).toHaveText("Details");
   await expect(page.locator(".panel-label")).toHaveText("Details");
 });
 
@@ -113,4 +119,41 @@ test("every route works with JavaScript off", async ({ browser }) => {
     await expect(page.locator(".rail")).toBeVisible();
   }
   await context.close();
+});
+
+test("the server sends less the deeper the shared layer is", async ({ request }) => {
+  const url = "/delta/card-6/activity";
+  const at = async (depth?: string) =>
+    (await (await request.get(url, { headers: depth ? { "DP-Partial": depth } : {} })).text()).length;
+
+  const [full, one, two, three] = await Promise.all([at(), at("1"), at("2"), at("3")]);
+
+  // Each level the client already holds is a level the server does not resend.
+  expect(three, "depth 3 should be the smallest").toBeLessThan(two);
+  expect(two).toBeLessThan(one);
+  expect(one).toBeLessThan(full);
+  expect(three, "a panel swap should cost a fraction of the document").toBeLessThan(full * 0.25);
+});
+
+test("chrome outside the swap is refreshed out of band", async ({ page }) => {
+  await page.goto("/delta/card-6/overview");
+  await stamp(page, ".bar");
+
+  await page.getByRole("link", { name: "Activity", exact: true }).click();
+  await page.waitForURL(/activity$/);
+
+  // The tab strip is not inside the swapped region, so without an out-of-band
+  // replacement it would still be highlighting Overview.
+  await expect(page.locator(".tab.is-current")).toHaveText("Activity");
+  await expect(page.locator(".panel-label")).toHaveText("Activity");
+  expect(await kept(page, ".bar"), "the section bar is still untouched").toBe(1);
+});
+
+test("the sidebar highlight follows a section change", async ({ page }) => {
+  await page.goto("/alpha");
+  await page.getByRole("link", { name: "Gamma", exact: true }).click();
+  await page.waitForURL(/\/gamma$/);
+  // The sidebar lives outside #app and is never swapped, so this too arrives
+  // out of band.
+  await expect(page.locator(".rail-link.is-current")).toHaveText("Gamma");
 });

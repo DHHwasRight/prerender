@@ -19,7 +19,7 @@ pub fn Shell(layout: &str, path: &str, sections: &[Section], children: Element) 
             <div class="frame">
                 <aside class="rail">
                     <div class="rail-mark"></div>
-                    <nav class="rail-nav">
+                    <nav class="rail-nav" id="rail-nav">
                         for section in sections {
                             <a href={section.url()} class={rail_class(&section.url(), path)}>
                                 <span class="dot" style={dot_style(section)}></span>
@@ -66,7 +66,6 @@ pub fn CardLayout(
     path: &str,
     section: &Section,
     card: &Card,
-    siblings: &[&Card],
     children: Element,
 ) -> Element {
     <div class="split">
@@ -76,7 +75,7 @@ pub fn CardLayout(
                 <span class="detail-title">{card.name}</span>
                 <a class="close" href={section.url()} aria-label="Back to the grid"></a>
             </header>
-            <nav class="tabs">
+            <nav class="tabs" id="card-tabs">
                 for (slug, label) in TABS {
                     <a href={card.tab_url(section, slug)} class={tab_class(&card.tab_url(section, slug), path)}>
                         {label}
@@ -89,8 +88,11 @@ pub fn CardLayout(
             <div dp-layout={layout} class="detail-body">{children}</div>
         </article>
 
-        <aside class="siblings">
-            for other in siblings {
+        // Every card, including the open one. Removing it would make the list
+        // shuffle under the pointer each time you pick from it; marking it
+        // keeps the list stable and says where you are.
+        <aside class="siblings" id="siblings">
+            for other in &section.cards {
                 <a href={other.url(section)} class={sibling_class(&other.url(section), path)}>
                     <span class="swatch sm" style={swatch_style(other)}></span>
                     <span class="sibling-name">{other.name}</span>
@@ -118,7 +120,11 @@ fn tab_class(href: &str, path: &str) -> &'static str {
 }
 
 fn sibling_class(href: &str, path: &str) -> &'static str {
-    if path.starts_with(&format!("{href}/")) { "sibling is-current" } else { "sibling" }
+    if path == href || path.starts_with(&format!("{href}/")) {
+        "sibling is-current"
+    } else {
+        "sibling"
+    }
 }
 
 fn dot_style(section: &Section) -> String {
@@ -132,4 +138,40 @@ fn swatch_style(card: &Card) -> String {
 
 fn tint_style(card: &Card) -> String {
     format!("--tint:{}", card.colour())
+}
+
+
+// ------------------------------------------------------------ out of band
+//
+// A skipped layout is not re-sent, which is the point of asking for a partial
+// — and the reason its own chrome goes stale. These render replacements for
+// exactly the parts that depend on which page is showing. `dp-swap-oob` tells
+// the client to apply them by id before the main swap.
+
+/// The sidebar, when the shell is skipped: only the current-section highlight
+/// can have changed.
+pub fn RailOob(path: &str, sections: &[Section]) -> Element {
+    <nav class="rail-nav" id="rail-nav" dp-swap-oob="outerHTML">
+        for section in sections {
+            <a href={section.url()} class={rail_class(&section.url(), path)}>
+                <span class="dot" style={dot_style(section)}></span>
+                {section.name}
+            </a>
+        }
+    </nav>
+}
+
+/// The tab strip, when a card layout is skipped.
+///
+/// Only the tabs. If this layout is shared then the card is the same one, so
+/// the sibling list beside it cannot have changed and the header above it
+/// cannot either — the active panel is the only thing that moved.
+pub fn CardOob(path: &str, section: &Section, card: &Card) -> Element {
+    <nav class="tabs" id="card-tabs" dp-swap-oob="outerHTML">
+        for (slug, label) in TABS {
+            <a href={card.tab_url(section, slug)} class={tab_class(&card.tab_url(section, slug), path)}>
+                {label}
+            </a>
+        }
+    </nav>
 }

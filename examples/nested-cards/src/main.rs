@@ -37,16 +37,25 @@ fn main() -> std::process::ExitCode {
     let mut site = Site::new().static_dir(root.join("assets"));
 
     {
-        let sections = Rc::clone(&sections);
-        site = site.layout("/", move |ctx: LayoutCtx<'_>| {
-            views::layouts::Shell {
-                layout: ctx.prefix,
-                path: ctx.path,
-                sections: &sections,
-                children: rsx::raw(ctx.children),
-            }
-            .render_to_string()
-        });
+        let for_render = Rc::clone(&sections);
+        let for_oob = Rc::clone(&sections);
+        site = site.layout_oob(
+            "/",
+            move |ctx: LayoutCtx<'_>| {
+                views::layouts::Shell {
+                    layout: ctx.prefix,
+                    path: ctx.path,
+                    sections: &for_render,
+                    children: rsx::raw(ctx.children),
+                }
+                .render_to_string()
+            },
+            // The shell is skipped by every partial, so the sidebar highlight
+            // would otherwise never move.
+            move |ctx: LayoutCtx<'_>| {
+                views::layouts::RailOob { path: ctx.path, sections: &for_oob }.render_to_string()
+            },
+        );
     }
 
     for (index, section) in sections.iter().enumerate() {
@@ -67,25 +76,30 @@ fn main() -> std::process::ExitCode {
         });
 
         for (card_index, card) in section.cards.iter().enumerate() {
-            let sections_for_card = Rc::clone(&sections);
-            site = site.layout(&card.url(section), move |ctx: LayoutCtx<'_>| {
-                let section = &sections_for_card[index];
-                let card = &section.cards[card_index];
-                let siblings: Vec<&data::Card> = section
-                    .cards
-                    .iter()
-                    .filter(|other| other.slug != card.slug)
-                    .collect();
-                views::layouts::CardLayout {
-                    layout: ctx.prefix,
-                    path: ctx.path,
-                    section,
-                    card,
-                    siblings: &siblings,
-                    children: rsx::raw(ctx.children),
-                }
-                .render_to_string()
-            });
+            let for_card = Rc::clone(&sections);
+            let for_card_oob = Rc::clone(&sections);
+            site = site.layout_oob(
+                &card.url(section),
+                move |ctx: LayoutCtx<'_>| {
+                    let section = &for_card[index];
+                    let card = &section.cards[card_index];
+                    views::layouts::CardLayout {
+                        layout: ctx.prefix,
+                        path: ctx.path,
+                        section,
+                        card,
+                        children: rsx::raw(ctx.children),
+                    }
+                    .render_to_string()
+                },
+                // Switching panels leaves the tab strip and the sibling list
+                // in place, so their highlights arrive out of band.
+                move |ctx: LayoutCtx<'_>| {
+                    let section = &for_card_oob[index];
+                    let card = &section.cards[card_index];
+                    views::layouts::CardOob { path: ctx.path, section, card }.render_to_string()
+                },
+            );
 
             // Opening a card lands on its first panel.
             site = site.redirect(card.url(section), card.tab_url(section, TABS[0].0));

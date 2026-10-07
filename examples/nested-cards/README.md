@@ -38,6 +38,51 @@ different amount of the document:
 `assets/boot.js` outlines whichever region was swapped, so the difference is
 visible rather than inferred.
 
+## The server sends only what is missing
+
+The client counts how many layers it already holds — the markers in the live
+document name the prefixes this page sits under, and a prefix either covers the
+destination or it does not — and sends that count as `DP-Partial`. The
+generator writes one prerendered tree per depth, so the server answers with
+what sits below that layer rather than everything below the root:
+
+| request | bytes |
+|---|---:|
+| no header (a crawler, or JavaScript off) | 2794 |
+| `DP-Partial: 1` | 2330 |
+| `DP-Partial: 2` | 1653 |
+| `DP-Partial: 3` | 425 |
+
+Switching panels costs 15% of the document. No manifest is involved: the
+counting is done from the DOM, and the response needs no layout markers because
+the client already knows where it asked for.
+
+## Chrome that is not swapped, but still has to change
+
+Keeping the tab strip in place is the right call until you notice it is still
+highlighting the panel you left. The strip sits outside the swapped region, so
+nothing replaces it.
+
+A skipped layout can contribute out-of-band markup for exactly those parts:
+
+```rust
+site.layout_oob(
+    card.url(section),
+    |ctx| CardLayout { … }.render_to_string(),       // when the layer is sent
+    |ctx| CardOob { path: ctx.path, … }.render_to_string(),  // when it is skipped
+)
+```
+
+`CardOob` renders the tab strip alone, carrying `dp-swap-oob="outerHTML"` and
+the id of the element it replaces. The client applies it before the main swap.
+The same mechanism moves the sidebar highlight when the shell is skipped.
+
+Only the *deepest* skipped layer contributes. If the section layer is shared
+then the section has not changed, so its sidebar highlight cannot have moved
+and re-sending it would be waste — before that rule, a panel switch carried a
+sidebar and a sibling list that were already correct, and cost 1669 bytes
+instead of 425.
+
 ## Where the marker goes decides what survives
 
 A swap replaces the **children** of the deepest `dp-layout` element the two
@@ -75,6 +120,13 @@ One consequence worth knowing: a layout cannot put state on its own marker
 element, because that element is never re-rendered. The grid and the split are
 therefore two different children of a neutral `.board`, rather than one element
 with a class the layout toggles.
+
+## The right-hand list keeps the open card
+
+It would be smaller to send only the five cards that are not open. It would
+also mean the list reshuffles under the pointer every time you pick from it,
+and the card you are reading has no position in it. All six stay; the open one
+is marked.
 
 ## Without JavaScript
 

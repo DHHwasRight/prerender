@@ -83,6 +83,10 @@ struct LayoutDef {
     prefix: String,
     segments: Vec<String>,
     render: LayoutFn,
+    /// Markup to send when this layout is *skipped*, so the parts of it that
+    /// depend on the current page can still be refreshed. See
+    /// [`Site::layout_oob`].
+    oob: Option<LayoutFn>,
 }
 
 struct RouteDef {
@@ -127,6 +131,34 @@ impl Site {
             prefix: prefix.to_string(),
             segments: segments(prefix),
             render: Box::new(render),
+            oob: None,
+        });
+        self
+    }
+
+    /// A layout that also contributes out-of-band markup when it is skipped.
+    ///
+    /// A partial starts below the layers the client already has, so those
+    /// layers are not re-sent — which is the point, and also the problem: a
+    /// skipped layout's own chrome may depend on the page being rendered. A
+    /// tab strip outside the swapped region keeps highlighting the tab you
+    /// just navigated away from.
+    ///
+    /// `oob` renders replacements for exactly those parts. Each element it
+    /// returns must carry `dp-swap-oob` and an `id` matching the element it
+    /// replaces; the client applies them before the main swap. The closure is
+    /// called only when this layout is skipped, so the full document and any
+    /// partial that still contains the layout are unaffected.
+    pub fn layout_oob<F, G>(mut self, prefix: &str, render: F, oob: G) -> Self
+    where
+        F: Fn(LayoutCtx<'_>) -> rsx::Result<Html> + 'static,
+        G: Fn(LayoutCtx<'_>) -> rsx::Result<Html> + 'static,
+    {
+        self.layouts.push(LayoutDef {
+            prefix: prefix.to_string(),
+            segments: segments(prefix),
+            render: Box::new(render),
+            oob: Some(Box::new(oob)),
         });
         self
     }
@@ -196,6 +228,7 @@ impl Site {
     /// `<body>`, so the client can swap it in without rewriting anything.
     fn render(&self, route: &RouteDef, skip: usize) -> rsx::Result<Html> {
         let chain = self.chain_for(&route.segments);
+        let skip = skip.min(chain.len());
         let mut html = (route.render)()?;
         for layout in chain.iter().skip(skip).rev() {
             html = (layout.render)(LayoutCtx {
@@ -204,26 +237,61 @@ impl Site {
                 path: &route.path,
             })?;
         }
-        Ok(html)
+
+        // Only the deepest skipped layout contributes. Anything above it is
+        // shared with the destination at a level that pins its own chrome: if
+        // the section layer is shared then the section has not changed, so the
+        // sidebar's highlight cannot have moved and re-sending it is waste.
+        // The deepest shared layer is the only one whose chrome depends on
+        // something that did change.
+        let mut oob = String::new();
+        if let Some(layout) = skip.checked_sub(1).and_then(|i| chain.get(i)) {
+            if let Some(render_oob) = &layout.oob {
+                oob.push_str(&render_oob(LayoutCtx {
+                    prefix: &layout.prefix,
+                    children: String::new(),
+                    path: &route.path,
+                })?);
+            }
+        }
+        Ok(oob + &html)
+    }
+
+    /// The deepest layout chain of any route, which is how many partial trees
+    /// are worth building.
+    fn max_depth(&self) -> usize {
+        self.routes
+            .iter()
+            .map(|route| self.chain_for(&route.segments).len())
+            .max()
+            .unwrap_or(1)
     }
 
     /// Writes both trees. Returns what was produced, for the caller to report.
     pub fn build(&self, out: &Path, partial_out: &Path) -> io::Result<Report> {
         let mut report = Report::default();
+        let depths = self.max_depth();
         for route in &self.routes {
             let full = self
                 .render(route, 0)
                 .map_err(|e| io::Error::other(format!("{}: {e}", route.path)))?;
-            let partial = self
-                .render(route, 1)
-                .map_err(|e| io::Error::other(format!("{} (partial): {e}", route.path)))?;
-
             write_page(out, &route.segments, &full)?;
-            write_page(partial_out, &route.segments, &partial)?;
             report.pages += 1;
             report.full_bytes += full.len();
-            report.partial_bytes += partial.len();
+
+            // One tree per number of layers the client may already hold. A
+            // client three layers in should not be sent the two it is keeping.
+            for depth in 1..=depths {
+                let partial = self.render(route, depth).map_err(|e| {
+                    io::Error::other(format!("{} (partial {depth}): {e}", route.path))
+                })?;
+                write_page(&partial_out.join(depth.to_string()), &route.segments, &partial)?;
+                if depth == 1 {
+                    report.partial_bytes += partial.len();
+                }
+            }
         }
+        report.depths = depths;
         for dir in &self.statics {
             report.assets += copy_dir(dir, out)?;
         }
@@ -334,7 +402,7 @@ impl Site {
              \x20   # client's to normalise.\n\
              \x20   map {var} $prerender_root {{\n\
              \x20       default   {full};\n\
-             \x20       ~*^true$  {partial};\n\
+             {depth_map}\
              \x20   }}\n\
              \n\
              \x20   server {{\n\
@@ -398,10 +466,32 @@ impl Site {
             mime = cfg.mime_types.display(),
             port = cfg.port,
             full = cfg.full.display(),
-            partial = cfg.partial.display(),
             redirects = self.redirect_block(),
+            depth_map = self.depth_map(cfg.partial),
         );
         s
+    }
+
+    /// One root per depth the client may ask for.
+    ///
+    /// The header carries how many layers the client already has, so `3` means
+    /// "send me what sits below the third". `true` is kept as an alias for one
+    /// level, which is what a client that does not count layers sends.
+    fn depth_map(&self, partial: &Path) -> String {
+        let mut out = String::new();
+        let _ = writeln!(
+            out,
+            "        ~*^true$  {};",
+            partial.join("1").display()
+        );
+        for depth in 1..=self.max_depth() {
+            let _ = writeln!(
+                out,
+                "        \"{depth}\"       {};",
+                partial.join(depth.to_string()).display()
+            );
+        }
+        out
     }
 
     /// Exact-match redirect locations, which nginx resolves before any prefix
@@ -471,6 +561,8 @@ pub struct Report {
     pub full_bytes: usize,
     pub partial_bytes: usize,
     pub assets: usize,
+    /// How many partial trees were written, one per layout depth.
+    pub depths: usize,
 }
 
 /// Locates nginx's own mime.types, so the generated config does not hardcode a
@@ -590,9 +682,10 @@ pub fn run(site: Site) -> ExitCode {
             match site.build(&out, &partial_out) {
                 Ok(report) => {
                     println!(
-                        "built {} pages, {} assets\n  {:>10} bytes  {}\n  {:>10} bytes  {}",
+                        "built {} pages, {} assets, {} partial depths\n  {:>10} bytes  {}\n  {:>10} bytes  {}/1",
                         report.pages,
                         report.assets,
+                        report.depths,
                         report.full_bytes,
                         out.display(),
                         report.partial_bytes,
