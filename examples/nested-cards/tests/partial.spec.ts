@@ -184,3 +184,43 @@ test("the highlighted row is tinted with its own card's colour", async ({ page }
     expect(border, `${card} border should match its swatch`).toBe(dot);
   }
 });
+
+
+test("the swap highlight is a rounded ring that outlives the content's own animations", async ({
+  page,
+}) => {
+  await page.goto("/delta/card-6/overview");
+  // Held at its first frame, so the assertions are not racing a 700ms fade.
+  await page.addStyleTag({ content: `.is-swapped { animation-play-state: paused !important; }` });
+
+  await page.getByRole("link", { name: "Activity", exact: true }).click();
+  await page.waitForURL(/activity$/);
+
+  // Well past the 200ms panel fade. animationend bubbles, so the inner
+  // animation finishing used to strip the class off the outer region and the
+  // ring was never visible.
+  await page.waitForTimeout(350);
+
+  const marked = page.locator(".is-swapped");
+  await expect(marked).toHaveCount(1);
+  await expect(marked).toHaveClass(/detail-body/);
+
+  const style = await marked.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { shadow: cs.boxShadow, radius: cs.borderTopLeftRadius };
+  });
+  expect(style.shadow, "the ring should be drawn").not.toBe("none");
+  expect(style.radius, "the ring should have rounded corners").not.toBe("0px");
+});
+
+test("the highlight encloses the whole board when a card is opened", async ({ page }) => {
+  await page.goto("/delta");
+  await page.addStyleTag({ content: `.is-swapped { animation-play-state: paused !important; }` });
+
+  await page.getByRole("link", { name: "Delta 3", exact: true }).click();
+  await page.waitForURL(/card-3/);
+  await page.waitForTimeout(350);
+
+  // A bigger navigation marks a bigger region, which is the point of showing it.
+  await expect(page.locator(".is-swapped")).toHaveClass(/board/);
+});

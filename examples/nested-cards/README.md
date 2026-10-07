@@ -35,8 +35,18 @@ different amount of the document:
 | `/alpha/card-2/…` | `/alpha/card-5/…` | `/alpha` | the split |
 | `/alpha/card-2/overview` | `/alpha/card-2/details` | `/alpha/card-2` | one panel |
 
-`assets/boot.js` outlines whichever region was swapped, so the difference is
-visible rather than inferred.
+`assets/boot.js` draws a rounded ring around whichever region was swapped, so
+the difference is visible rather than inferred: a tab switch rings the panel
+alone, opening a card rings the whole board.
+
+Two details that ring needed. It is a `box-shadow` rather than an `outline`,
+because an outline only follows `border-radius` in recent browsers and the
+swapped region is usually a bare container with none of its own — the ring came
+out as a hard rectangle around rounded content. And the class is removed on
+`animationend` only when the event came from the marked element itself:
+`animationend` bubbles, so the entrance animation of the content swapped in was
+ending the highlight first, and a 200ms panel fade cut a 700ms ring down to
+nothing anyone could see.
 
 ## The server sends only what is missing
 

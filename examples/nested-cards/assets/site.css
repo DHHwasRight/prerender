@@ -242,12 +242,39 @@ a { text-decoration: none; color: inherit; }
 }
 
 /* boot.js marks whichever region was actually swapped, which is the whole
- * point of the example: the outline shows how much of the page changed. */
-.is-swapped { animation: flash 600ms ease-out; }
+ * point of the example: the ring shows how much of the page changed.
+ *
+ * Drawn with box-shadow rather than outline. An outline only follows
+ * border-radius in recent browsers, and the swapped region is often a bare
+ * container with no radius of its own — so the ring came out as a hard
+ * rectangle around rounded content. A radius on the element plus a shadow
+ * spread gives a rounded box everywhere, and the shadow sits outside the
+ * border box without taking space, so nothing reflows while it fades.
+ */
+.is-swapped {
+  border-radius: 14px;
+  animation: flash 700ms ease-out;
+}
+/* One ring hugging the box, plus a soft halo. An earlier version drew a
+ * background-coloured gap under the ring, which works only when you know what
+ * is behind the element — and the swapped region sits on the panel in one case
+ * and on the page ground in another, so the gap hid most of the ring. */
 @keyframes flash {
-  0%   { outline: 2px solid var(--c3); outline-offset: 4px; }
-  70%  { outline: 2px solid var(--c3); outline-offset: 4px; }
-  100% { outline: 2px solid transparent; outline-offset: 4px; }
+  0% {
+    box-shadow:
+      0 0 0 3px var(--c3),
+      0 0 0 12px color-mix(in srgb, var(--c3) 28%, transparent);
+  }
+  60% {
+    box-shadow:
+      0 0 0 3px var(--c3),
+      0 0 0 12px color-mix(in srgb, var(--c3) 20%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 3px transparent,
+      0 0 0 12px transparent;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
