@@ -93,7 +93,11 @@ pub fn CardLayout(
         // keeps the list stable and says where you are.
         <aside class="siblings" id="siblings">
             for other in &section.cards {
-                <a href={other.url(section)} class={sibling_class(&other.url(section), path)}>
+                // Each row carries its own card's colour, so the highlight is
+                // that card's rather than one shared accent.
+                <a href={other.url(section)}
+                   class={sibling_class(&other.url(section), path)}
+                   style={tint_style(other)}>
                     <span class="swatch sm" style={swatch_style(other)}></span>
                     <span class="sibling-name">{other.name}</span>
                 </a>

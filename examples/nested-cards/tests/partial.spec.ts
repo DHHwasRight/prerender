@@ -157,3 +157,30 @@ test("the sidebar highlight follows a section change", async ({ page }) => {
   // out of band.
   await expect(page.locator(".rail-link.is-current")).toHaveText("Gamma");
 });
+
+
+test("the highlighted row is tinted with its own card's colour", async ({ page }) => {
+  // Two cards whose swatches differ, so a shared accent colour would show up
+  // as the same highlight on both.
+  for (const [card, swatch] of [
+    ["card-6", "#ffafcc"],
+    ["card-3", "#a2d2ff"],
+  ] as const) {
+    await page.goto(`/delta/${card}/overview`);
+
+    const row = page.locator(".sibling.is-current");
+    await expect(row).toHaveCount(1);
+    await expect(row).toHaveText(new RegExp(card.replace("card-", "Delta ")));
+
+    const [tint, border, dot] = await Promise.all([
+      row.evaluate((el) => getComputedStyle(el).getPropertyValue("--tint").trim()),
+      row.evaluate((el) => getComputedStyle(el).borderTopColor),
+      row.locator(".swatch").evaluate((el) => getComputedStyle(el).backgroundColor),
+    ]);
+
+    expect(tint, `${card} row should carry its own colour`).toBe(swatch);
+    // The border resolves from the same custom property as the swatch, so the
+    // two must agree once the browser has normalised both to rgb().
+    expect(border, `${card} border should match its swatch`).toBe(dot);
+  }
+});
