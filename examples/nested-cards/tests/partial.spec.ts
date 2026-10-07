@@ -207,9 +207,18 @@ test("the swap highlight is a rounded ring that outlives the content's own anima
 
   const style = await marked.evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { shadow: cs.boxShadow, radius: cs.borderTopLeftRadius };
+    return {
+      width: cs.outlineWidth,
+      style: cs.outlineStyle,
+      offset: cs.outlineOffset,
+      radius: cs.borderTopLeftRadius,
+    };
   });
-  expect(style.shadow, "the ring should be drawn").not.toBe("none");
+  expect(style.style, "the ring should be drawn").toBe("solid");
+  // The gap is what makes it read as a frame around the region rather than a
+  // border on it, and the radius is what rounds the outline.
+  expect(parseFloat(style.offset), "the ring should stand off the content").toBeGreaterThan(4);
+  expect(parseFloat(style.width), "the ring should be hairline").toBeLessThanOrEqual(2);
   expect(style.radius, "the ring should have rounded corners").not.toBe("0px");
 });
 

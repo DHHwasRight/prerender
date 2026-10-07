@@ -39,14 +39,17 @@ different amount of the document:
 the difference is visible rather than inferred: a tab switch rings the panel
 alone, opening a card rings the whole board.
 
-Two details that ring needed. It is a `box-shadow` rather than an `outline`,
-because an outline only follows `border-radius` in recent browsers and the
-swapped region is usually a bare container with none of its own — the ring came
-out as a hard rectangle around rounded content. And the class is removed on
-`animationend` only when the event came from the marked element itself:
-`animationend` bubbles, so the entrance animation of the content swapped in was
-ending the highlight first, and a 200ms panel fade cut a 700ms ring down to
-nothing anyone could see.
+Two details that ring needed. It is an `outline` with an `outline-offset`,
+because only an outline can stand away from the element without a colour behind
+it — a shadow's spread starts at the border box, so the gap would have to be
+painted in whatever is behind, and the swapped region sits on the white panel
+in one case and the page ground in another. The radius on the element is what
+rounds it.
+
+And the class is removed on `animationend` only when the event came from the
+marked element itself. `animationend` bubbles, so the entrance animation of the
+content swapped in was ending the highlight first — a 200ms panel fade cut a
+700ms ring down to nothing anyone could see.
 
 ## The server sends only what is missing
 

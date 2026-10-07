@@ -244,37 +244,23 @@ a { text-decoration: none; color: inherit; }
 /* boot.js marks whichever region was actually swapped, which is the whole
  * point of the example: the ring shows how much of the page changed.
  *
- * Drawn with box-shadow rather than outline. An outline only follows
- * border-radius in recent browsers, and the swapped region is often a bare
- * container with no radius of its own — so the ring came out as a hard
- * rectangle around rounded content. A radius on the element plus a shadow
- * spread gives a rounded box everywhere, and the shadow sits outside the
- * border box without taking space, so nothing reflows while it fades.
+ * An outline rather than a box-shadow, because only an outline can sit away
+ * from the element without a colour behind it. A shadow's spread starts at the
+ * border box, so the gap would have to be painted in whatever is behind — and
+ * the swapped region sits on the white panel in one case and the page ground
+ * in another. `outline-offset` just leaves a transparent gap.
+ *
+ * The radius on the element is what rounds the outline; without it the ring is
+ * a hard rectangle around rounded content.
  */
 .is-swapped {
-  border-radius: 14px;
+  border-radius: 16px;
   animation: flash 700ms ease-out;
 }
-/* One ring hugging the box, plus a soft halo. An earlier version drew a
- * background-coloured gap under the ring, which works only when you know what
- * is behind the element — and the swapped region sits on the panel in one case
- * and on the page ground in another, so the gap hid most of the ring. */
 @keyframes flash {
-  0% {
-    box-shadow:
-      0 0 0 3px var(--c3),
-      0 0 0 12px color-mix(in srgb, var(--c3) 28%, transparent);
-  }
-  60% {
-    box-shadow:
-      0 0 0 3px var(--c3),
-      0 0 0 12px color-mix(in srgb, var(--c3) 20%, transparent);
-  }
-  100% {
-    box-shadow:
-      0 0 0 3px transparent,
-      0 0 0 12px transparent;
-  }
+  0%   { outline: 1.5px solid var(--c3); outline-offset: 8px; }
+  60%  { outline: 1.5px solid var(--c3); outline-offset: 8px; }
+  100% { outline: 1.5px solid transparent; outline-offset: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
