@@ -9,4 +9,9 @@ rust-version = "1.74"
 
 [workspace.dependencies]
 prerender = { path = "crates/prerender", version = "0.1.0" }
-rsx = { path = "../templ/crates/rsx", version = "0.1.0" }
+# A git dependency rather than a sibling path, so a fresh clone of this repo
+# alone builds. To develop the two together, point cargo back at a local
+# checkout without editing this file:
+#
+#   cargo build --config 'patch."https://github.com/DHHwasRight/rsx".rsx.path="../templ/crates/rsx"'
+rsx = { git = "https://github.com/DHHwasRight/rsx.git", branch = "main", version = "0.1.0" }

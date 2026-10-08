@@ -1859,6 +1859,7 @@ dependencies = [
 [[package]]
 name = "rsx"
 version = "0.1.0"
+source = "git+https://github.com/DHHwasRight/rsx.git?branch=main#68e53f5bffd191563fe498230b587d594e526598"
 dependencies = [
  "rsx-macros",
 ]
@@ -1866,10 +1867,12 @@ dependencies = [
 [[package]]
 name = "rsx-core"
 version = "0.1.0"
+source = "git+https://github.com/DHHwasRight/rsx.git?branch=main#68e53f5bffd191563fe498230b587d594e526598"
 
 [[package]]
 name = "rsx-macros"
 version = "0.1.0"
+source = "git+https://github.com/DHHwasRight/rsx.git?branch=main#68e53f5bffd191563fe498230b587d594e526598"
 dependencies = [
  "proc-macro2",
  "rsx-core",
