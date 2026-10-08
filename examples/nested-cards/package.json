@@ -2,6 +2,12 @@
   "name": "nested-cards-e2e",
   "private": true,
   "type": "module",
-  "scripts": { "test": "playwright test" },
-  "devDependencies": { "@playwright/test": "^1.50.0" }
+  "scripts": {
+    "test": "playwright test",
+    "record": "./scripts/record.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "ffmpeg-static": "^5.2.0"
+  }
 }

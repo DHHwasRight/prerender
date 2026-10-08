@@ -6,3 +6,5 @@ dist-partial/
 node_modules/
 test-results/
 .run-test/
+examples/nested-cards/docs/*.webm
+docs/.video/

@@ -2,10 +2,14 @@
 
 Four nested layouts, built to show what a partial navigation actually replaces.
 
+![A navigation from the shell down to a single panel, each step ringing the part
+of the page that was replaced](docs/tour.webp)
+
 ```sh
 cargo run -p nested-cards -- build --out dist --partial-out dist-partial
 ./serve.sh                 # builds, writes an nginx config, serves on :8097
 npx playwright test        # proves the claims below
+npm run record             # re-records the tour above
 ```
 
 Everything is a rectangle. The only colour comes from five swatches —
@@ -146,3 +150,20 @@ is marked.
 Every route is a complete document, so the whole thing works with scripting
 off — the layouts stop being partial and become ordinary page loads. A test
 covers it.
+
+## Re-recording the tour
+
+```sh
+npm run record
+```
+
+[`scripts/record.spec.ts`](scripts/record.spec.ts) drives the same four clicks
+the tests make, pausing on each long enough for the 700ms ring to play out,
+then [`scripts/record.sh`](scripts/record.sh) converts the result.
+
+Two things it has to do that a test does not. Playwright draws no pointer in
+its videos, so one is injected and moved to each target before the click —
+without it a viewer sees panels change with nothing appearing to cause it. And
+Playwright records WebM only, so the file committed here is converted
+afterwards with ffmpeg, which GitHub will animate inline where it will not play
+a video from a repository path.

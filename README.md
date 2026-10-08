@@ -13,6 +13,14 @@ server.
 All the forms live at the same URL. A request carrying a `DP-Partial` header is
 served from a partial tree; everything else gets the document.
 
+![A navigation from the shell down to a single panel, each step ringing the part
+of the page that was replaced](examples/nested-cards/docs/tour.webp)
+
+Four clicks, each one layer deeper. The ring marks exactly what the client
+replaced: the section, then the board, then one panel — and on the way back
+out, the board again. Everything outside the ring was never re-sent.
+Recorded by [`scripts/record.sh`](examples/nested-cards/scripts/record.sh).
+
 ```
 dist/delta/card-6/activity/index.html             2932 bytes   <!DOCTYPE> down
 dist-partial/1/delta/card-6/activity/index.html   2468 bytes   below the shell
