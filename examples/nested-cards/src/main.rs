@@ -53,7 +53,11 @@ fn main() -> std::process::ExitCode {
             // The shell is skipped by every partial, so the sidebar highlight
             // would otherwise never move.
             move |ctx: LayoutCtx<'_>| {
-                views::layouts::RailOob { path: ctx.path, sections: &for_oob }.render_to_string()
+                views::layouts::RailOob {
+                    path: ctx.path,
+                    sections: &for_oob,
+                }
+                .render_to_string()
             },
         );
     }
@@ -72,7 +76,10 @@ fn main() -> std::process::ExitCode {
         // The section index is the grid.
         let sections_for_grid = Rc::clone(&sections);
         site = site.route(&section.url(), move || {
-            views::pages::Grid { section: &sections_for_grid[index] }.render_to_string()
+            views::pages::Grid {
+                section: &sections_for_grid[index],
+            }
+            .render_to_string()
         });
 
         for (card_index, card) in section.cards.iter().enumerate() {
@@ -97,7 +104,12 @@ fn main() -> std::process::ExitCode {
                 move |ctx: LayoutCtx<'_>| {
                     let section = &for_card_oob[index];
                     let card = &section.cards[card_index];
-                    views::layouts::CardOob { path: ctx.path, section, card }.render_to_string()
+                    views::layouts::CardOob {
+                        path: ctx.path,
+                        section,
+                        card,
+                    }
+                    .render_to_string()
                 },
             );
 

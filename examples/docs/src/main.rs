@@ -7,8 +7,8 @@ mod views {
     rsx::load_dir!("src/views");
 }
 
-use rsx::Template;
 use prerender::{LayoutCtx, Site};
+use rsx::Template;
 
 /// Bridges prerender's `Html` children to rsx's `Element` children. Layouts are
 /// rendered innermost first, so by the time one runs its children are already

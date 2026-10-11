@@ -124,6 +124,24 @@ client applies them by `id` before the main swap. Only the **deepest skipped**
 layout contributes OOB markup to a given partial, so a response never carries
 replacements for chrome the client is about to discard anyway.
 
+## Publishing without a server
+
+Partial navigation needs a server that can route on a request header. Some
+hosts have none -- GitHub Pages among them -- and there the partial trees are
+bytes nothing can ever ask for.
+
+```sh
+cargo run -p docs-site -- build --no-partials
+```
+
+One tree, an ordinary static site. Navigation degrades to full page loads and
+nothing else changes, because every page was already a complete document --
+which is the same property that makes the site work with JavaScript off.
+
+The switch is not a second rendering path: a test asserts the documents are
+byte-identical either way, so the site you publish is the site that was
+tested.
+
 ## Serving it
 
 `prerender nginx` emits a complete config — not a snippet — so it runs as

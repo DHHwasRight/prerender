@@ -111,7 +111,6 @@ fn rewrite_components(md: &str) -> String {
     out
 }
 
-
 /// Removes the JavaScript an MDX file may carry.
 ///
 /// Mintlify pages can be React modules: a `mode: "custom"` landing page starts
@@ -155,7 +154,10 @@ fn strip_javascript(md: &str) -> String {
                 break;
             }
         }
-        if skipping_until.is_some() || trimmed.starts_with("<script") || trimmed.starts_with("<style") {
+        if skipping_until.is_some()
+            || trimmed.starts_with("<script")
+            || trimmed.starts_with("<style")
+        {
             continue;
         }
 
@@ -266,9 +268,9 @@ fn dedent_components(lines: &[String]) -> Vec<String> {
             continue;
         }
 
-        match open_block_at(lines, i).and_then(|(tag, last)| {
-            find_close(lines, last, &tag).map(|close| (last, close))
-        }) {
+        match open_block_at(lines, i)
+            .and_then(|(tag, last)| find_close(lines, last, &tag).map(|close| (last, close)))
+        {
             Some((last, close)) => {
                 // The tag itself may span several lines; all of them are
                 // emitted flush left so the rewriter sees one tag.
@@ -379,7 +381,8 @@ fn min_indent(lines: &[String]) -> usize {
     let indent = |l: &String| l.len() - l.trim_start().len();
     let is_tag = |l: &String| {
         let t = l.trim_start();
-        t.starts_with("</") || (t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic()))
+        t.starts_with("</")
+            || (t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic()))
     };
 
     let prose = lines
@@ -389,7 +392,12 @@ fn min_indent(lines: &[String]) -> usize {
         .min();
 
     prose.unwrap_or_else(|| {
-        lines.iter().filter(|l| !l.trim().is_empty()).map(indent).min().unwrap_or(0)
+        lines
+            .iter()
+            .filter(|l| !l.trim().is_empty())
+            .map(indent)
+            .min()
+            .unwrap_or(0)
     })
 }
 
@@ -423,7 +431,6 @@ fn fenced_lines(md: &str) -> impl Iterator<Item = (&str, bool)> {
         }
     })
 }
-
 
 /// Finds the end of a component tag that starts at `start`.
 ///
@@ -487,7 +494,6 @@ fn scan_tag(src: &str, start: usize) -> Option<(String, String, bool, usize)> {
     None
 }
 
-
 /// Rewrites raw HTML tags to drop attributes a browser cannot use.
 ///
 /// MDX pages carry React attributes — `className`, `style={{…}}`, and event
@@ -497,7 +503,9 @@ fn scan_tag(src: &str, start: usize) -> Option<(String, String, bool, usize)> {
 /// prose. Dropping them removes both the noise and the thing that breaks the
 /// block, and `className` becomes `class` so the markup is at least styleable.
 fn sanitize_raw_tags(prose: &str) -> String {
-    const KEEP: [&str; 8] = ["href", "src", "alt", "id", "title", "colspan", "rowspan", "lang"];
+    const KEEP: [&str; 8] = [
+        "href", "src", "alt", "id", "title", "colspan", "rowspan", "lang",
+    ];
 
     let mut out = String::with_capacity(prose.len());
     let mut i = 0;
@@ -509,7 +517,11 @@ fn sanitize_raw_tags(prose: &str) -> String {
                     out.push('<');
                     out.push_str(&name);
                     for (key, value) in attributes(&attrs) {
-                        let key = if key.eq_ignore_ascii_case("classname") { "class" } else { &key };
+                        let key = if key.eq_ignore_ascii_case("classname") {
+                            "class"
+                        } else {
+                            &key
+                        };
                         if KEEP.contains(&key) || key == "class" {
                             out.push_str(&format!(" {key}=\"{}\"", escape_text(&value)));
                         }
@@ -559,7 +571,10 @@ fn attributes(attrs: &str) -> Vec<(String, String)> {
             if i < attrs.len() && bytes[i] == b'"' {
                 let value_start = i + 1;
                 if let Some(close) = attrs[value_start..].find('"') {
-                    found.push((key.to_string(), attrs[value_start..value_start + close].to_string()));
+                    found.push((
+                        key.to_string(),
+                        attrs[value_start..value_start + close].to_string(),
+                    ));
                     i = value_start + close + 1;
                     continue;
                 }
@@ -640,9 +655,7 @@ fn rewrite_open_tags(prose: &str) -> String {
     let mut i = 0;
     while i < prose.len() {
         let rest = &prose[i..];
-        if rest.starts_with('<')
-            && rest[1..].starts_with(|c: char| c.is_ascii_uppercase())
-        {
+        if rest.starts_with('<') && rest[1..].starts_with(|c: char| c.is_ascii_uppercase()) {
             if let Some((name, attrs, self_closing, end)) = scan_tag(prose, i) {
                 out.push_str(&opening_html(&name, &attrs, self_closing));
                 i = end;
@@ -690,7 +703,10 @@ fn opening_html(tag: &str, attrs: &str, self_closing: bool) -> String {
         // Nothing to wrap, but the attributes often are the content (an icon,
         // a field name), so they are kept as data for CSS to surface.
         return match attribute(attrs, "title").or_else(|| attribute(attrs, "name")) {
-            Some(title) => format!("<div class=\"{class}\"><p class=\"mdx-title\">{}</p></div>", escape_text(title)),
+            Some(title) => format!(
+                "<div class=\"{class}\"><p class=\"mdx-title\">{}</p></div>",
+                escape_text(title)
+            ),
             None => format!("<div class=\"{class}\"></div>"),
         };
     }
@@ -709,14 +725,18 @@ fn closing_html(_tag: &str) -> &'static str {
 
 /// Minimal text escaping for an attribute value promoted into the document.
 fn escape_text(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Classes are prefixed so syntect's scope atoms — `keyword`, `string`,
 /// `comment`, `source` — cannot collide with the site's own class names.
 /// [`highlight_stylesheet`] uses the same prefix, so the two stay in step.
 const CLASS_PREFIX: &str = "hl-";
-const CLASS_STYLE: ClassStyle = ClassStyle::SpacedPrefixed { prefix: CLASS_PREFIX };
+const CLASS_STYLE: ClassStyle = ClassStyle::SpacedPrefixed {
+    prefix: CLASS_PREFIX,
+};
 /// The selector syntect puts the theme's own foreground and background on.
 const THEME_CLASS: &str = "hl-code";
 
@@ -829,7 +849,10 @@ pub fn highlight_stylesheet(theme: &str) -> Result<String> {
                 .iter()
                 .map(|t| t.as_name())
                 .collect();
-            anyhow!("unknown highlight theme {theme:?}; known themes: {}", known.join(", "))
+            anyhow!(
+                "unknown highlight theme {theme:?}; known themes: {}",
+                known.join(", ")
+            )
         })?;
 
     css_for_theme_with_class_style(themes().get(name), CLASS_STYLE)
@@ -937,7 +960,13 @@ pub fn parse(source: &Path, content_root: &Path) -> io::Result<Doc> {
     let url = front.slug.clone().unwrap_or_else(|| format!("/{slug}"));
 
     let html = render_markdown(&rewrite_components(&body));
-    Ok(Doc { url, slug, front, html, source: source.to_path_buf() })
+    Ok(Doc {
+        url,
+        slug,
+        front,
+        html,
+        source: source.to_path_buf(),
+    })
 }
 
 /// Reads every `.md` and `.mdx` under `root`, in sorted order so a build is
@@ -982,7 +1011,10 @@ mod tests {
     #[test]
     fn a_title_attribute_becomes_a_heading() {
         let html = md("<Accordion title=\"Why billing is hard\">\n  Because.\n</Accordion>\n");
-        assert!(html.contains(r#"<p class="mdx-title">Why billing is hard</p>"#), "{html}");
+        assert!(
+            html.contains(r#"<p class="mdx-title">Why billing is hard</p>"#),
+            "{html}"
+        );
     }
 
     #[test]
@@ -1004,8 +1036,14 @@ mod tests {
         // code block, so without dedenting this list is literal text.
         let html = md("<Tab title=\"Dashboard\">\n    To create one:\n\n    1. Access the **list**;\n    2. Click add;\n</Tab>\n");
         assert!(html.contains("<ol"), "list should render: {html}");
-        assert!(html.contains("<strong>list</strong>"), "emphasis should render: {html}");
-        assert!(!html.contains("<pre"), "should not become a code block: {html}");
+        assert!(
+            html.contains("<strong>list</strong>"),
+            "emphasis should render: {html}"
+        );
+        assert!(
+            !html.contains("<pre"),
+            "should not become a code block: {html}"
+        );
     }
 
     #[test]
@@ -1016,8 +1054,14 @@ mod tests {
             "<Tab title=\"Dashboard\">\n      To create one:\n\n        1. Open the **Features** page;\n\n    <Frame caption=\"x\">\n      shot\n    </Frame>\n</Tab>\n",
         );
         assert!(html.contains("<ol"), "list should render: {html}");
-        assert!(html.contains("<strong>Features</strong>"), "bold should render: {html}");
-        assert!(!html.contains("1. Open the **Features**"), "literal text: {html}");
+        assert!(
+            html.contains("<strong>Features</strong>"),
+            "bold should render: {html}"
+        );
+        assert!(
+            !html.contains("1. Open the **Features**"),
+            "literal text: {html}"
+        );
     }
 
     #[test]
@@ -1032,7 +1076,10 @@ mod tests {
         // The fence is dedented with its block, but the relative indent inside
         // the sample must survive or every nested snippet is reflowed.
         assert!(html.contains("echo hi"), "{html}");
-        assert!(html.contains("  echo hi") || html.contains("  <span"), "relative indent lost: {html}");
+        assert!(
+            html.contains("  echo hi") || html.contains("  <span"),
+            "relative indent lost: {html}"
+        );
     }
 
     #[test]
@@ -1042,7 +1089,10 @@ mod tests {
         let html = md("<Card\n  title=\"Billing\"\n  icon=\"receipt\">\n  Body.\n</Card>\n");
         assert!(html.contains(r#"<div class="mdx mdx-card">"#), "{html}");
         assert!(html.contains("Billing"), "{html}");
-        assert!(!html.to_lowercase().contains("<card"), "raw tag survived: {html}");
+        assert!(
+            !html.to_lowercase().contains("<card"),
+            "raw tag survived: {html}"
+        );
     }
 
     #[test]
@@ -1050,7 +1100,10 @@ mod tests {
         let html = md(
             "<CardGroup cols={2}>\n  <Card\n    title=\"One\"\n    icon=\"x\"\n  >\n    ```bash\n    echo hi\n    ```\n  </Card>\n</CardGroup>\n",
         );
-        assert!(!regex::Regex::new(r"<[A-Z]").unwrap().is_match(&html), "{html}");
+        assert!(
+            !regex::Regex::new(r"<[A-Z]").unwrap().is_match(&html),
+            "{html}"
+        );
         assert!(html.contains("echo hi"), "{html}");
     }
 
@@ -1065,7 +1118,10 @@ mod tests {
         assert!(html.contains(r#"<div class="mdx mdx-card">"#), "{html}");
         assert!(html.contains("GoCardless"), "{html}");
         assert!(html.contains("Body text."), "{html}");
-        assert!(!html.contains("<svg"), "icon markup leaked into the page: {html}");
+        assert!(
+            !html.contains("<svg"),
+            "icon markup leaked into the page: {html}"
+        );
         assert_eq!(
             html.matches("<div").count(),
             html.matches("</div>").count(),
@@ -1144,8 +1200,13 @@ mod tests {
 
     #[test]
     fn callouts_become_divs_with_their_markdown_intact() {
-        let html = render_markdown(&rewrite_components("<Info>\n  Deducted **before** tax.\n</Info>\n"));
-        assert!(html.contains(r#"<div class="callout callout-info">"#), "{html}");
+        let html = render_markdown(&rewrite_components(
+            "<Info>\n  Deducted **before** tax.\n</Info>\n",
+        ));
+        assert!(
+            html.contains(r#"<div class="callout callout-info">"#),
+            "{html}"
+        );
         // The blank-line insertion is what makes this bold rather than literal.
         assert!(html.contains("<strong>before</strong>"), "{html}");
     }
@@ -1195,4 +1256,3 @@ mod tests {
         assert!(highlight_stylesheet("no-such-theme").is_err());
     }
 }
-

@@ -74,7 +74,10 @@ pub fn minify_css(source: &str, filename: &str) -> Result<String> {
 
     let mut sheet = StyleSheet::parse(
         source,
-        ParserOptions { filename: filename.to_string(), ..ParserOptions::default() },
+        ParserOptions {
+            filename: filename.to_string(),
+            ..ParserOptions::default()
+        },
     )
     .map_err(|e| anyhow!("{filename}: {e}"))?;
 
@@ -83,11 +86,18 @@ pub fn minify_css(source: &str, filename: &str) -> Result<String> {
     // `minify: true` only removes whitespace, so skipping this step would
     // leave most of the win on the table.
     sheet
-        .minify(MinifyOptions { targets, ..MinifyOptions::default() })
+        .minify(MinifyOptions {
+            targets,
+            ..MinifyOptions::default()
+        })
         .map_err(|e| anyhow!("{filename}: {e}"))?;
 
     let out = sheet
-        .to_css(PrinterOptions { minify: true, targets, ..PrinterOptions::default() })
+        .to_css(PrinterOptions {
+            minify: true,
+            targets,
+            ..PrinterOptions::default()
+        })
         .map_err(|e| anyhow!("{filename}: {e}"))?;
 
     Ok(out.code)
@@ -208,7 +218,9 @@ pub fn inline_into_html(html: &str, assets: &InlineAssets) -> String {
 /// Whether `rest` opens the named tag, checking that what follows the name is
 /// a boundary so `<scriptish>` does not match `script`.
 fn opens_tag(rest: &str, name: &str) -> bool {
-    let Some(after) = rest.get(1..1 + name.len()) else { return false };
+    let Some(after) = rest.get(1..1 + name.len()) else {
+        return false;
+    };
     if !after.eq_ignore_ascii_case(name) {
         return false;
     }
@@ -299,8 +311,10 @@ fn attr<'a>(tag: &'a str, want: &str) -> Option<&'a str> {
 /// `rel` is a space-separated token list, so `rel="preload stylesheet"` has to
 /// match while `rel="stylesheetish"` must not.
 fn has_rel(tag: &str, want: &str) -> bool {
-    attr(tag, "rel")
-        .is_some_and(|rel| rel.split_ascii_whitespace().any(|t| t.eq_ignore_ascii_case(want)))
+    attr(tag, "rel").is_some_and(|rel| {
+        rel.split_ascii_whitespace()
+            .any(|t| t.eq_ignore_ascii_case(want))
+    })
 }
 
 /// Case-insensitive substring search, so `</SCRIPT>` closes a script.
@@ -385,7 +399,9 @@ mod tests {
 
     #[test]
     fn css_syntax_error_is_an_error_naming_the_file() {
-        let err = minify_css("@media (", "broken.css").unwrap_err().to_string();
+        let err = minify_css("@media (", "broken.css")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("broken.css"), "{err}");
     }
 
@@ -401,7 +417,10 @@ mod tests {
         let out = minify_js(source, "app.js").unwrap();
         assert!(out.len() < source.len() / 2, "{out}");
         assert!(!out.contains("dropped"));
-        assert!(!out.contains("nameOfPerson"), "locals should be mangled: {out}");
+        assert!(
+            !out.contains("nameOfPerson"),
+            "locals should be mangled: {out}"
+        );
         // The export is the module's contract and must keep its name.
         assert!(out.contains("greet"), "{out}");
     }
@@ -414,7 +433,9 @@ mod tests {
 
     #[test]
     fn js_syntax_error_is_an_error_rather_than_a_panic() {
-        let err = minify_js("function (", "broken.js").unwrap_err().to_string();
+        let err = minify_js("function (", "broken.js")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("broken.js"), "{err}");
 
         // oxc recovers from this one and still yields an AST; it must be
@@ -455,9 +476,18 @@ mod tests {
 
         // Untouched: a non-stylesheet rel, an unregistered URL, a third-party
         // script, and text that merely looks like markup.
-        assert!(out.contains(r#"<link rel="icon" href="/favicon.ico">"#), "{out}");
-        assert!(out.contains(r#"<link rel="stylesheet" href="/vendor.css">"#), "{out}");
-        assert!(out.contains(r#"<script src="https://example.com/a.js"></script>"#), "{out}");
+        assert!(
+            out.contains(r#"<link rel="icon" href="/favicon.ico">"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<link rel="stylesheet" href="/vendor.css">"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<script src="https://example.com/a.js"></script>"#),
+            "{out}"
+        );
         assert!(out.contains("<p>a < b</p>"), "{out}");
     }
 

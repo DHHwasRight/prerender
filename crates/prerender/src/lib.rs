@@ -98,7 +98,10 @@ struct RouteDef {
 /// Splits a URL path into non-empty segments. `/docs/guides/` and
 /// `/docs/guides` are the same route.
 fn segments(path: &str) -> Vec<String> {
-    path.split('/').filter(|s| !s.is_empty()).map(str::to_string).collect()
+    path.split('/')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Whether `prefix` covers `path`, compared segment by segment so that
@@ -215,8 +218,11 @@ impl Site {
 
     /// The layouts wrapping `path`, shallowest first.
     fn chain_for(&self, path: &[String]) -> Vec<&LayoutDef> {
-        let mut chain: Vec<&LayoutDef> =
-            self.layouts.iter().filter(|l| covers(&l.segments, path)).collect();
+        let mut chain: Vec<&LayoutDef> = self
+            .layouts
+            .iter()
+            .filter(|l| covers(&l.segments, path))
+            .collect();
         chain.sort_by_key(|l| l.segments.len());
         chain
     }
@@ -269,8 +275,24 @@ impl Site {
 
     /// Writes both trees. Returns what was produced, for the caller to report.
     pub fn build(&self, out: &Path, partial_out: &Path) -> io::Result<Report> {
+        self.build_with(out, Some(partial_out))
+    }
+
+    /// Writes the documents, and the partial trees only when `partial_out` is
+    /// given.
+    ///
+    /// Passing `None` produces an ordinary static site. Partial navigation
+    /// needs a server that can route on a request header, and some hosts --
+    /// GitHub Pages among them -- have no such thing. There the partial trees
+    /// are bytes nothing can ever ask for, and the pages still work, because
+    /// every one of them is a complete document by construction.
+    pub fn build_with(&self, out: &Path, partial_out: Option<&Path>) -> io::Result<Report> {
         let mut report = Report::default();
-        let depths = self.max_depth();
+        let depths = if partial_out.is_some() {
+            self.max_depth()
+        } else {
+            0
+        };
         for route in &self.routes {
             let full = self
                 .render(route, 0)
@@ -281,13 +303,19 @@ impl Site {
 
             // One tree per number of layers the client may already hold. A
             // client three layers in should not be sent the two it is keeping.
-            for depth in 1..=depths {
-                let partial = self.render(route, depth).map_err(|e| {
-                    io::Error::other(format!("{} (partial {depth}): {e}", route.path))
-                })?;
-                write_page(&partial_out.join(depth.to_string()), &route.segments, &partial)?;
-                if depth == 1 {
-                    report.partial_bytes += partial.len();
+            if let Some(partial_out) = partial_out {
+                for depth in 1..=depths {
+                    let partial = self.render(route, depth).map_err(|e| {
+                        io::Error::other(format!("{} (partial {depth}): {e}", route.path))
+                    })?;
+                    write_page(
+                        &partial_out.join(depth.to_string()),
+                        &route.segments,
+                        &partial,
+                    )?;
+                    if depth == 1 {
+                        report.partial_bytes += partial.len();
+                    }
                 }
             }
         }
@@ -330,15 +358,16 @@ impl Site {
                         ));
                     }
                     if !html.contains("<!--children-->") {
-                        problems.push(format!(
-                            "layout {} dropped its children",
-                            layout.prefix
-                        ));
+                        problems.push(format!("layout {} dropped its children", layout.prefix));
                     }
                 }
             }
         }
-        if problems.is_empty() { Ok(()) } else { Err(problems) }
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(problems)
+        }
     }
 
     /// A complete, runnable nginx config serving both trees.
@@ -479,11 +508,7 @@ impl Site {
     /// level, which is what a client that does not count layers sends.
     fn depth_map(&self, partial: &Path) -> String {
         let mut out = String::new();
-        let _ = writeln!(
-            out,
-            "        ~*^true$  {};",
-            partial.join("1").display()
-        );
+        let _ = writeln!(out, "        ~*^true$  {};", partial.join("1").display());
         for depth in 1..=self.max_depth() {
             let _ = writeln!(
                 out,
@@ -500,7 +525,9 @@ impl Site {
         if self.redirects.is_empty() {
             return String::new();
         }
-        let mut out = String::from("\n        # Section prefixes that content links to but that have no page.\n");
+        let mut out = String::from(
+            "\n        # Section prefixes that content links to but that have no page.\n",
+        );
         for (from, to) in &self.redirects {
             let _ = writeln!(out, "        location = {from} {{ return 301 {to}; }}");
             // Both spellings, since a link may or may not carry the slash.
@@ -571,7 +598,10 @@ fn nginx_mime_types() -> String {
     let out = std::process::Command::new("nginx").arg("-V").output();
     if let Ok(out) = out {
         let text = String::from_utf8_lossy(&out.stderr);
-        if let Some(conf) = text.split_whitespace().find_map(|t| t.strip_prefix("--conf-path=")) {
+        if let Some(conf) = text
+            .split_whitespace()
+            .find_map(|t| t.strip_prefix("--conf-path="))
+        {
             if let Some(dir) = Path::new(conf).parent() {
                 return dir.join("mime.types").display().to_string();
             }
@@ -582,7 +612,10 @@ fn nginx_mime_types() -> String {
 
 /// The site binary's command line.
 #[derive(Parser)]
-#[command(name = "<site>", about = "Render a prerendered site and serve it from nginx.")]
+#[command(
+    name = "<site>",
+    about = "Render a prerendered site and serve it from nginx."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Cmd>,
@@ -609,7 +642,12 @@ struct Opts {
     #[arg(long, global = true, value_name = "DIR", default_value = "dist")]
     out: PathBuf,
     /// Where the partials go.
-    #[arg(long, global = true, value_name = "DIR", default_value = "dist-partial")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "DIR",
+        default_value = "dist-partial"
+    )]
     partial_out: PathBuf,
     /// Request header that selects the partial tree.
     #[arg(long, global = true, value_name = "NAME", default_value = "DP-Partial")]
@@ -620,6 +658,12 @@ struct Opts {
     /// nginx listen port.
     #[arg(long, global = true, value_name = "PORT", default_value_t = 8080)]
     port: u16,
+    /// Build documents only, for a host that cannot route on a header.
+    ///
+    /// Partial navigation degrades to ordinary page loads; nothing else
+    /// changes, because every page is already a complete document.
+    #[arg(long, global = true)]
+    no_partials: bool,
     /// nginx mime.types [default: found from `nginx -V`]
     ///
     /// Resolved after parsing rather than as a clap default, so that merely
@@ -636,10 +680,22 @@ pub fn run(site: Site) -> ExitCode {
             let _ = e.print();
             // `--help` and `--version` arrive here too, and asking for them is
             // not a failure.
-            return if e.use_stderr() { ExitCode::FAILURE } else { ExitCode::SUCCESS };
+            return if e.use_stderr() {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            };
         }
     };
-    let Opts { out, partial_out, header, prefix, port, mime_types } = cli.opts;
+    let Opts {
+        out,
+        partial_out,
+        header,
+        prefix,
+        port,
+        no_partials,
+        mime_types,
+    } = cli.opts;
     let mime_types = mime_types.unwrap_or_else(nginx_mime_types);
 
     match cli.command.unwrap_or(Cmd::Build) {
@@ -655,6 +711,14 @@ pub fn run(site: Site) -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Cmd::Nginx if no_partials => {
+            eprintln!(
+                "error: --no-partials builds one tree; the generated config exists to \n\
+                 choose between two. Serve {} with any static file server.",
+                out.display()
+            );
+            ExitCode::FAILURE
+        }
         Cmd::Nginx => {
             let abs = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             print!(
@@ -679,18 +743,24 @@ pub fn run(site: Site) -> ExitCode {
                 }
                 return ExitCode::FAILURE;
             }
-            match site.build(&out, &partial_out) {
+            let partial = (!no_partials).then_some(partial_out.as_path());
+            match site.build_with(&out, partial) {
                 Ok(report) => {
-                    println!(
-                        "built {} pages, {} assets, {} partial depths\n  {:>10} bytes  {}\n  {:>10} bytes  {}/1",
+                    print!(
+                        "built {} pages, {} assets\n  {:>10} bytes  {}\n",
                         report.pages,
                         report.assets,
-                        report.depths,
                         report.full_bytes,
                         out.display(),
-                        report.partial_bytes,
-                        partial_out.display(),
                     );
+                    if report.depths > 0 {
+                        println!(
+                            "  {:>10} bytes  {}/1  ({} partial depths)",
+                            report.partial_bytes,
+                            partial_out.display(),
+                            report.depths,
+                        );
+                    }
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
@@ -723,8 +793,11 @@ mod tests {
             .route("/docs/guides/x", || Ok("P".into()));
 
         let route = &site.routes[0];
-        let prefixes: Vec<&str> =
-            site.chain_for(&route.segments).iter().map(|l| l.prefix.as_str()).collect();
+        let prefixes: Vec<&str> = site
+            .chain_for(&route.segments)
+            .iter()
+            .map(|l| l.prefix.as_str())
+            .collect();
         assert_eq!(prefixes, ["/", "/docs", "/docs/guides"]);
         assert_eq!(site.render(route, 0).unwrap(), "<r><d><g>P</g></d></r>");
         // The partial is the same markup with the root layer dropped.
@@ -776,8 +849,75 @@ mod tests {
     fn check_rejects_an_unmarked_layout() {
         let site = Site::new().layout("/docs", |c| Ok(format!("<div>{}</div>", c.children)));
         assert!(site.check().is_err());
-        let site = Site::new()
-            .layout("/docs", |c| Ok(format!("<div dp-layout=\"/docs\">{}</div>", c.children)));
+        let site = Site::new().layout("/docs", |c| {
+            Ok(format!("<div dp-layout=\"/docs\">{}</div>", c.children))
+        });
         assert!(site.check().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod no_partial_tests {
+    use super::*;
+
+    fn site() -> Site {
+        Site::new()
+            .layout("/", |ctx: LayoutCtx<'_>| {
+                Ok(format!(
+                    "<!DOCTYPE html><html lang=\"en\"><head><title>t</title></head>\
+                     <body><main dp-layout=\"{}\">{}</main></body></html>",
+                    ctx.prefix, ctx.children
+                ))
+            })
+            .route("/", || Ok("<h1>home</h1>".to_string()))
+            .route("/about", || Ok("<h1>about</h1>".to_string()))
+    }
+
+    #[test]
+    fn no_partials_writes_documents_only() {
+        let root = std::env::temp_dir().join("prerender-no-partials");
+        let _ = fs::remove_dir_all(&root);
+        let out = root.join("dist");
+        let partial = root.join("dist-partial");
+
+        let report = site().build_with(&out, None).expect("build");
+
+        assert_eq!(report.pages, 2);
+        assert_eq!(report.depths, 0, "no partial trees were asked for");
+        assert_eq!(report.partial_bytes, 0);
+        assert!(out.join("index.html").is_file());
+        assert!(out.join("about/index.html").is_file());
+        assert!(
+            !partial.exists(),
+            "nothing should be written beside the documents"
+        );
+
+        // The pages are unchanged: a host with no header routing still gets
+        // a whole site, which is the point of the switch.
+        let home = fs::read_to_string(out.join("index.html")).expect("read");
+        assert!(home.starts_with("<!DOCTYPE html>"), "{home}");
+        assert!(home.contains("<h1>home</h1>"), "{home}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_documents_are_byte_identical_either_way() {
+        // The switch must not be a second rendering path, or the site people
+        // publish stops being the site that was tested.
+        let root = std::env::temp_dir().join("prerender-both-ways");
+        let _ = fs::remove_dir_all(&root);
+        let (a, b, p) = (root.join("a"), root.join("b"), root.join("p"));
+
+        site().build_with(&a, None).expect("build a");
+        site().build_with(&b, Some(&p)).expect("build b");
+
+        for page in ["index.html", "about/index.html"] {
+            assert_eq!(
+                fs::read_to_string(a.join(page)).expect("a"),
+                fs::read_to_string(b.join(page)).expect("b"),
+                "{page} differs between the two modes"
+            );
+        }
+        let _ = fs::remove_dir_all(&root);
     }
 }
