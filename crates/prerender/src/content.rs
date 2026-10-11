@@ -161,16 +161,16 @@ fn strip_javascript(md: &str) -> String {
             continue;
         }
 
-        // `export`/`import` at the top level introduce a module, not prose.
-        if depth == 0 && !skipping_statement {
-            if trimmed.starts_with("export ") || trimmed.starts_with("import ") {
-                skipping_statement = true;
-            }
-            // A line opening with a brace between tags is an expression, not
-            // text; prose does not begin a paragraph with `{`.
-            else if trimmed.starts_with('{') {
-                skipping_statement = true;
-            }
+        // `export`/`import` at the top level introduce a module, not prose,
+        // and a line opening with a brace between tags is an expression --
+        // prose does not begin a paragraph with `{`.
+        if depth == 0
+            && !skipping_statement
+            && (trimmed.starts_with("export ")
+                || trimmed.starts_with("import ")
+                || trimmed.starts_with('{'))
+        {
+            skipping_statement = true;
         }
 
         if skipping_statement {
@@ -415,8 +415,8 @@ fn fenced_lines(md: &str) -> impl Iterator<Item = (&str, bool)> {
         let trimmed = line.trim_start();
         let opener = trimmed
             .starts_with("```")
-            .then(|| "```")
-            .or_else(|| trimmed.starts_with("~~~").then(|| "~~~"));
+            .then_some("```")
+            .or_else(|| trimmed.starts_with("~~~").then_some("~~~"));
         match (&fence, opener) {
             (None, Some(marker)) => {
                 fence = Some(marker.to_string());
